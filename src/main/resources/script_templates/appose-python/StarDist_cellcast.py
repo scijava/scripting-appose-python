@@ -1,5 +1,5 @@
 #!appose-python
-#@script (language="appose-python", env="cellcast-stardist.toml", scheme="pixi.toml")
+#@script (language="appose-python", env="cellcast.toml", scheme="pixi.toml")
 
 #@ Img image
 #@output Img labels

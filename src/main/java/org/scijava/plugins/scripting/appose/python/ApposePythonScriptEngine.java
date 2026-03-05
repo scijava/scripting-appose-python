@@ -41,7 +41,6 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import javax.script.Bindings;
-import javax.script.ScriptContext;
 import javax.script.ScriptEngine;
 import javax.script.ScriptException;
 
@@ -84,10 +83,6 @@ import org.scijava.script.ScriptModule;
  * @see ScriptEngine
  */
 public class ApposePythonScriptEngine extends AbstractScriptEngine {
-
-	/** Cache of built environments, keyed by resolved env file absolute path. */
-	private static final Map<String, Environment> ENV_CACHE =
-		new ConcurrentHashMap<>();
 
 	@Parameter
 	private ConvertService convertService;
@@ -235,9 +230,8 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 	// -- Helper methods --
 
 	/**
-	 * Lazily builds (or fetches from cache) the Appose {@link Environment}
-	 * described by the {@code env} and {@code scheme} attributes of the script's
-	 * {@code #@script} directive.
+	 * Lazily builds the Appose {@link Environment} described by the {@code env}
+	 * and {@code scheme} attributes of the script's {@code #@script} directive.
 	 */
 	private Environment buildEnvironment(final ScriptInfo info)
 		throws ScriptException
@@ -247,46 +241,21 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 		if (envRef == null) return null;
 
 		final File envFile = resolveEnvFile(envRef, info.getPath());
-		final String cacheKey = envFile.getAbsolutePath();
 		final String envName = sanitizeEnvName(info.getPath());
 
+		log.info("Building Appose environment: " + envName);
 		try {
-			return ENV_CACHE.computeIfAbsent(cacheKey, key -> {
-				log.info("Building Appose environment: " + key);
-				try {
-					return selectBuilder(key, info.get("scheme")).name(envName).build();
-				}
-				catch (final BuildException e) {
-					throw new RuntimeException(
-						"Failed to build Appose environment: " + e.getMessage(), e);
-				}
-			});
-		}
-		catch (final RuntimeException e) {
-			if (e.getCause() instanceof BuildException) {
-				throw new ScriptException(e.getMessage());
-			}
-			throw e;
-		}
-	}
+			String scheme = info.get("scheme");
+			Builder<?> builder = scheme == null ?
+				Appose.file(envFile) : Appose.file(envFile).scheme(scheme);
 
-	/**
-	 * Selects the appropriate Appose builder based on the {@code scheme} hint.
-	 * Falls back to auto-detection ({@link Appose#file}) if unspecified or
-	 * unrecognized.
-	 */
-	private Builder<?> selectBuilder(final String envFilePath,
-		final String scheme) throws BuildException
-	{
-		if (scheme == null || scheme.isEmpty()) return Appose.file(envFilePath);
-		switch (scheme.toLowerCase()) {
-			case "pixi.toml":       return Appose.pixi(envFilePath);
-			case "environment.yml": return Appose.mamba(envFilePath);
-			case "requirements.txt":
-			case "pyproject.toml":  return Appose.uv(envFilePath);
-			default:
-				log.warn("Unrecognized scheme '" + scheme + "'; using auto-detection.");
-				return Appose.file(envFilePath);
+			return builder.name(envName).build();
+		}
+		catch (final BuildException e) {
+			ScriptException se = new ScriptException(
+				"Failed to build Appose environment");
+			se.initCause(e);
+			throw se;
 		}
 	}
 
@@ -308,9 +277,9 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 	 * all non-alphanumeric characters (except {@code -}) with {@code _}.
 	 */
 	private static String sanitizeEnvName(final String scriptPath) {
-		if (scriptPath == null) return "appose-python";
+		if (scriptPath == null) return "scripting-appose-python";
 		return new File(scriptPath).getAbsolutePath()
-			.replaceAll("[^a-zA-Z0-9_-]", "_");
+			.replaceAll("[^a-zA-Z0-9_]", "-");
 	}
 
 	/**

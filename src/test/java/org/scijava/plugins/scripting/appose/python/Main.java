@@ -29,11 +29,42 @@
 
 package org.scijava.plugins.scripting.appose.python;
 
-import org.scijava.script.ScriptREPL;
+import net.imagej.Dataset;
+import net.imagej.DatasetService;
+import net.imagej.axis.Axes;
+import net.imagej.axis.AxisType;
+import org.scijava.Context;
+import org.scijava.ui.UIService;
+import org.scijava.ui.swing.script.TextEditor;
+
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 
 public class Main {
 
 	public static void main(String... args) throws Exception {
-		ScriptREPL.main(args);
+		final Context ctx = new Context();
+
+		long[] dims = {512, 384};
+		String name = "blank";
+		AxisType[] axes = {Axes.X, Axes.Y};
+		int bitsPerPixel = 8;
+		boolean signed = false;
+		boolean floating = false;
+		UIService ui = ctx.service(UIService.class);
+		ui.showUI();
+		DatasetService ds = ctx.service(DatasetService.class);
+		Dataset dataset = ds.create(dims, name, axes, bitsPerPixel, signed, floating);
+		ui.show(dataset);
+		System.out.println(dataset);
+
+		TextEditor scriptEditor = new TextEditor(ctx);
+		scriptEditor.setVisible(true);
+		scriptEditor.addWindowListener(new WindowAdapter() {
+			@Override
+			public void windowClosed(WindowEvent e) {
+				ctx.dispose();
+			}
+		});
 	}
 }

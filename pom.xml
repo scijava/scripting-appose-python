@@ -89,7 +89,8 @@
 		<!-- NB: Deploy releases to the SciJava Maven repository. -->
 		<releaseProfiles>sign,deploy-to-scijava</releaseProfiles>
 
-		<appose.version>0.10.0</appose.version>
+		<appose.version>0.11.0</appose.version>
+		<imglib2-appose.version>0.9.0</imglib2-appose.version>
 	</properties>
 
 	<dependencies>
@@ -121,9 +122,15 @@
 			<scope>test</scope>
 		</dependency>
 		<dependency>
-			<groupId>org.scijava</groupId>
-			<artifactId>scijava-common</artifactId>
-			<classifier>tests</classifier>
+			<groupId>net.imglib2</groupId>
+			<artifactId>imglib2-appose</artifactId>
+			<version>${imglib2-appose.version}</version>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<!-- For net.imglib2.img.Img parameter handling. -->
+			<groupId>net.imagej</groupId>
+			<artifactId>imagej-common</artifactId>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>
