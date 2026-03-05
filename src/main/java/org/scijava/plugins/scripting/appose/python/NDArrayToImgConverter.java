@@ -6,13 +6,13 @@
  * %%
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- * 
+ *
  * 1. Redistributions of source code must retain the above copyright notice,
  *    this list of conditions and the following disclaimer.
  * 2. Redistributions in binary form must reproduce the above copyright notice,
  *    this list of conditions and the following disclaimer in the documentation
  *    and/or other materials provided with the distribution.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -29,39 +29,44 @@
 
 package org.scijava.plugins.scripting.appose.python;
 
-import java.util.Collections;
-import java.util.List;
-
-import javax.script.ScriptEngine;
-
-import org.scijava.Priority;
+import org.apposed.appose.NDArray;
+import org.scijava.convert.Converter;
 import org.scijava.plugin.Plugin;
-import org.scijava.script.AbstractScriptLanguage;
-import org.scijava.script.ScriptLanguage;
+
+import net.imagej.convert.ConciseConverter;
+import net.imglib2.img.Img;
+import net.imglib2.img.planar.PlanarImgFactory;
+import net.imglib2.appose.ShmImg;
+import net.imglib2.type.NativeType;
+import net.imglib2.util.ImgUtil;
 
 /**
- * An adapter for Python to the SciJava scripting interface.
+ * Converts an Appose {@link NDArray} to an ImgLib2 {@link Img}.
+ * <p>
+ * The {@code NDArray} is first wrapped as a {@link ShmImg}, then copied into a
+ * {@link net.imglib2.img.planar.PlanarImg}. The copy step is necessary because
+ * {@code ShmImg} is backed by a direct NIO buffer (not a Java primitive array),
+ * which is incompatible with ImageJ1's {@code ImageProcessorUtils}.
+ * </p>
  *
  * @author Curtis Rueden
- * @see ScriptEngine
  */
-@Plugin(type = ScriptLanguage.class, name = "appose-python",
-	priority = Priority.VERY_LOW)
-public class ApposePythonScriptLanguage extends AbstractScriptLanguage {
+@SuppressWarnings("rawtypes")
+@Plugin(type = Converter.class)
+public class NDArrayToImgConverter extends ConciseConverter<NDArray, Img> {
 
-	@Override
-	public String getEngineName() {
-		return "appose-python";
+	public NDArrayToImgConverter() {
+		super(NDArray.class, Img.class, NDArrayToImgConverter::doConvert);
 	}
 
-	@Override
-	public List<String> getExtensions() {
-		return Collections.singletonList("py");
+	private static <T extends NativeType<T>> Img<T> doConvert(
+		final NDArray ndArray)
+	{
+		final ShmImg<T> shmImg = new ShmImg<>(ndArray);
+		final PlanarImgFactory<T> factory =
+			new PlanarImgFactory<>(shmImg.getType());
+		final Img<T> result = factory.create(shmImg);
+		ImgUtil.copy(shmImg, result);
+		return result;
 	}
-
-	@Override
-	public ScriptEngine getScriptEngine() {
-		return new ApposePythonScriptEngine(getContext());
-	}
-
 }

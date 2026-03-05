@@ -6,13 +6,13 @@
  * %%
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- * 
+ *
  * 1. Redistributions of source code must retain the above copyright notice,
  *    this list of conditions and the following disclaimer.
  * 2. Redistributions in binary form must reproduce the above copyright notice,
  *    this list of conditions and the following disclaimer in the documentation
  *    and/or other materials provided with the distribution.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -29,39 +29,40 @@
 
 package org.scijava.plugins.scripting.appose.python;
 
-import java.util.Collections;
-import java.util.List;
-
-import javax.script.ScriptEngine;
-
-import org.scijava.Priority;
+import org.apposed.appose.NDArray;
+import org.scijava.convert.Converter;
 import org.scijava.plugin.Plugin;
-import org.scijava.script.AbstractScriptLanguage;
-import org.scijava.script.ScriptLanguage;
+
+import net.imagej.convert.ConciseConverter;
+import net.imglib2.RandomAccessibleInterval;
+import net.imglib2.appose.NDArrays;
+import net.imglib2.type.NativeType;
 
 /**
- * An adapter for Python to the SciJava scripting interface.
+ * Converts a {@link RandomAccessibleInterval} to an Appose {@link NDArray}.
+ * <p>
+ * If the input already wraps an {@code NDArray} (e.g., a {@code ShmImg}),
+ * the existing {@code NDArray} is returned without copying. Otherwise the
+ * image is copied into a new shared-memory {@code NDArray}.
+ * </p>
  *
  * @author Curtis Rueden
- * @see ScriptEngine
  */
-@Plugin(type = ScriptLanguage.class, name = "appose-python",
-	priority = Priority.VERY_LOW)
-public class ApposePythonScriptLanguage extends AbstractScriptLanguage {
+@SuppressWarnings("rawtypes")
+@Plugin(type = Converter.class)
+public class RAIToNDArrayConverter
+	extends ConciseConverter<RandomAccessibleInterval, NDArray>
+{
 
-	@Override
-	public String getEngineName() {
-		return "appose-python";
+	public RAIToNDArrayConverter() {
+		//noinspection unchecked
+		super(RandomAccessibleInterval.class, NDArray.class,
+			RAIToNDArrayConverter::doConvert);
 	}
 
-	@Override
-	public List<String> getExtensions() {
-		return Collections.singletonList("py");
+	private static <T extends NativeType<T>> NDArray doConvert(
+		final RandomAccessibleInterval<T> rai)
+	{
+		return NDArrays.asNDArray(rai);
 	}
-
-	@Override
-	public ScriptEngine getScriptEngine() {
-		return new ApposePythonScriptEngine(getContext());
-	}
-
 }

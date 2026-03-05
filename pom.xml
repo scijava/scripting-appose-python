@@ -115,22 +115,27 @@
 			<version>${appose.version}</version>
 		</dependency>
 
-		<!-- Test dependencies -->
+		<!-- TODO: Move the image-specific parts of this code to a dedicated imagej-appose component. -->
+		<!-- ImgLib2 dependencies -->
 		<dependency>
-			<groupId>junit</groupId>
-			<artifactId>junit</artifactId>
-			<scope>test</scope>
+			<groupId>net.imglib2</groupId>
+			<artifactId>imglib2</artifactId>
 		</dependency>
 		<dependency>
 			<groupId>net.imglib2</groupId>
 			<artifactId>imglib2-appose</artifactId>
 			<version>${imglib2-appose.version}</version>
-			<scope>test</scope>
 		</dependency>
+		<!-- ImageJ2 dependencies -->
 		<dependency>
-			<!-- For net.imglib2.img.Img parameter handling. -->
 			<groupId>net.imagej</groupId>
 			<artifactId>imagej-common</artifactId>
+		</dependency>
+
+		<!-- Test dependencies -->
+		<dependency>
+			<groupId>junit</groupId>
+			<artifactId>junit</artifactId>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>
