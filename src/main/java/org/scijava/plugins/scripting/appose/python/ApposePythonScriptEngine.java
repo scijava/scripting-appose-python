@@ -115,7 +115,7 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 		}
 
 		// Collect declared inputs, converting array-like values to NDArray.
-		// Track which inputs were converted for the Python flip preamble.
+		// Track which inputs were converted for the Python preamble.
 		final Map<String, Object> taskInputs = new HashMap<>();
 		final List<String> arrayInputNames = new ArrayList<>();
 		final List<NDArray> ownedNDArrays = new ArrayList<>(); // closed after task
@@ -157,7 +157,7 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 			}
 		}
 
-		// Wrap the user's script with preamble (flip inputs) and postamble
+		// Wrap the user's script with preamble (unpack inputs) and postamble
 		// (pack outputs into task.outputs).
 		final String wrappedScript = buildWrappedScript(
 			script, arrayInputNames, arrayOutputNames, plainOutputNames);
@@ -284,12 +284,12 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 
 	/**
 	 * Wraps the user's script with a preamble and postamble that handle
-	 * axis-order flipping and {@code task.outputs} capture for array types.
+	 * input transformations and {@code task.outputs} capture for array types.
 	 * <p>
-	 * The preamble defines {@code _flip} and {@code _pack_img} helpers, then
-	 * converts each array-typed input from its incoming NDArray (Java F-order)
-	 * to a C-order numpy array. The postamble captures each declared output into
-	 * {@code task.outputs}, packing array outputs back into NDArray for Java.
+	 * The preamble defines a {@code _pack_img} helper, then converts each
+	 * array-typed input from its incoming NDArray to a numpy array. The
+	 * postamble captures each declared output into {@code task.outputs},
+	 * packing array outputs back into NDArray for Java.
 	 * </p>
 	 */
 	private static String buildWrappedScript(
@@ -304,23 +304,16 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 		sb.append("import numpy as _np\n");
 		sb.append("from appose import NDArray as _NDArray\n");
 		sb.append("\n");
-		sb.append("def _flip(arr):\n");
-		sb.append("    \"\"\"Reverse all axes: Java F-order <-> Python C-order.\"\"\"\n");
-		sb.append("    return _np.ascontiguousarray(\n");
-		sb.append("        _np.transpose(arr, tuple(reversed(range(arr.ndim)))))\n");
-		sb.append("\n");
 		sb.append("def _pack_img(arr):\n");
-		sb.append("    \"\"\"Pack a C-order numpy array into a new shared-memory NDArray.\"\"\"\n");
-		sb.append("    f_arr = _np.asfortranarray(\n");
-		sb.append("        _np.transpose(arr, tuple(reversed(range(arr.ndim)))))\n");
-		sb.append("    nd = _NDArray(str(f_arr.dtype), f_arr.shape)\n");
-		sb.append("    nd.ndarray()[:] = f_arr\n");
+		sb.append("    \"\"\"Pack a numpy array into a new shared-memory NDArray.\"\"\"\n");
+		sb.append("    nd = _NDArray(str(arr.dtype), arr.shape)\n");
+		sb.append("    nd.ndarray()[:] = arr\n");
 		sb.append("    return nd\n");
 		sb.append("\n");
 
-		// Convert each array input: NDArray (F-order) → numpy array (C-order).
+		// Convert each array input: NDArray → numpy array.
 		for (final String name : arrayInputNames) {
-			sb.append(name).append(" = _flip(").append(name).append(".ndarray())\n");
+			sb.append(name).append(" = ").append(name).append(".ndarray()\n");
 		}
 		if (!arrayInputNames.isEmpty()) sb.append("\n");
 
