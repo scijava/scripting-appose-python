@@ -19,3 +19,29 @@ the SciJava Common wiki.
 
 See also:
 * [Python Scripting](https://imagej.net/scripting/python) on the ImageJ wiki.
+
+## Example
+
+```python
+#@script (language="appose-python", pypi=["cellcast"])
+
+#@ Img image
+
+#@ Double (value=1.0, description="minimum percentile value for normalization") pmin
+#@ Double (value=99.8, description="maximum percentile value for normalization") pmax
+#@ Double (value=0.479, description="Polygon probability threshold") prob_threshold
+#@ Double (value=0.3, description="Non-Maximum Suppression threshold") nms_threshold
+#@ Boolean (value=true, description="Set True for GPU inference via WebGPU, False for CPU inference") gpu
+
+#@output Img labels
+
+import cellcast.models.stardist_2d as stardist
+labels = stardist.predict_versatile_fluo(
+    image,
+    pmin,
+    pmax,
+    prob_threshold,
+    nms_threshold,
+    gpu,
+)
+```

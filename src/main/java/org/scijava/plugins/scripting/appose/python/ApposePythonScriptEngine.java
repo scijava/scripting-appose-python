@@ -237,18 +237,49 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 		throws ScriptException
 	{
 		if (info == null) return null;
-		final String envRef = info.get("env");
-		if (envRef == null) return null;
 
-		final File envFile = resolveEnvFile(envRef, info.getPath());
+		final String envValue = info.get("env");
+		final File envFile = envValue == null ? null : resolveEnvFile(envValue, info.getPath());
 		final String envName = sanitizeEnvName(info.getPath());
 
-		log.info("Building Appose environment: " + envName);
-		try {
-			String scheme = info.get("scheme");
-			Builder<?> builder = scheme == null ?
-				Appose.file(envFile) : Appose.file(envFile).scheme(scheme);
+		final String scheme = info.get("scheme");
+		final List<String> pypi = toListOfStrings(info.get("pypi"));
+		final List<String> conda = toListOfStrings(info.get("conda"));
+		final String python = info.get("python");
 
+		log.info("Building Appose environment: " + envName);
+
+		try {
+			final Builder<?> builder;
+			if (envFile == null) {
+				// No environment file given -- use inline builder.
+				if (conda.isEmpty()) {
+					// No conda packages required -- use uv.
+					String[] pypiPkgs = pypi.toArray(new String[0]);
+					builder = python == null ?
+						Appose.uv().include(pypiPkgs) :
+						Appose.uv().python(python).include(pypiPkgs);
+				}
+				else {
+					// Conda packages specified -- use pixi.
+					List<String> condaPkgList = new ArrayList<>();
+					if (conda.stream().anyMatch(v -> v.matches("python\\b.*"))) {
+						// Python was not included in the conda package list -- add it manually.
+						// If python version value was given, use that, otherwise open-ended.
+						condaPkgList.add(python != null ? "python=" + python : "python");
+					}
+					condaPkgList.addAll(conda);
+					String[] condaPkgs = condaPkgList.toArray(new String[0]);
+					String[] pypiPkgs = pypi.toArray(new String[0]);
+					builder = Appose.pixi().conda(condaPkgs).pypi(pypiPkgs);
+				}
+			}
+			else {
+				// Build with the given environment file.
+				builder = scheme == null ?
+					Appose.file(envFile) :
+					Appose.file(envFile).scheme(scheme);
+			}
 			return builder.name(envName).build();
 		}
 		catch (final BuildException e) {
@@ -257,6 +288,11 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 			se.initCause(e);
 			throw se;
 		}
+	}
+
+	private List<String> toListOfStrings(String value) {
+		// TODO Auto-generated method stub
+		throw new UnsupportedOperationException("Unimplemented method 'toListOfStrings'");
 	}
 
 	/** Resolves an (optionally relative) env file path against the script path. */
