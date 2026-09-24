@@ -89,7 +89,7 @@
 		<!-- NB: Deploy releases to the SciJava Maven repository. -->
 		<releaseProfiles>sign,deploy-to-scijava</releaseProfiles>
 
-		<appose.version>0.11.0</appose.version>
+		<appose.version>0.12.0</appose.version>
 		<imglib2-appose.version>0.9.0</imglib2-appose.version>
 	</properties>
 
