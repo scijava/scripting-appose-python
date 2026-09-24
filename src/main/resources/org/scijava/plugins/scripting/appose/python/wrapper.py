@@ -1,0 +1,60 @@
+# Appose task script that runs a SciJava appose-python script.
+#
+# The Java side passes the following task inputs, alongside the script's own
+# declared inputs (which Appose injects as global variables):
+#
+#   _appose_script       -- source code of the user script
+#   _appose_script_path  -- file name to report in tracebacks
+#   _appose_array_inputs -- names of inputs passed as appose.NDArray
+#   _appose_outputs      -- names of declared script outputs
+#
+# Note: The user script is compiled with its real file name, so tracebacks
+# point to the correct file and line number.
+
+import ast as _appose_ast
+
+
+def _appose_pack(value):
+    """Converts numpy values into something Appose can send back to Java."""
+    # Note: Avoid importing numpy unless the value came from numpy anyway.
+    if type(value).__module__ != "numpy":
+        return value
+    import numpy
+
+    if isinstance(value, numpy.ndarray):
+        from appose import NDArray
+
+        nd = NDArray(str(value.dtype), list(value.shape))
+        nd.ndarray()[...] = value
+        return nd
+    if isinstance(value, numpy.generic):
+        return value.item()
+    return value
+
+
+def _appose_run():
+    g = globals()
+
+    # Unwrap each array input from NDArray to numpy array.
+    for name in _appose_array_inputs:
+        g[name] = g[name].ndarray()
+
+    # Execute the user script. If its last statement is an expression,
+    # evaluate it separately to obtain the script's return value.
+    block = _appose_ast.parse(_appose_script, _appose_script_path, "exec")
+    last = None
+    if block.body and isinstance(block.body[-1], _appose_ast.Expr):
+        last = _appose_ast.Expression(block.body.pop().value)
+    exec(compile(block, _appose_script_path, "exec"), g)  # noqa: S102
+    if last is not None:
+        result = eval(compile(last, _appose_script_path, "eval"), g)  # noqa: S307
+        if result is not None:
+            task.outputs["_appose_return_value"] = _appose_pack(result)
+
+    # Capture declared outputs; undefined ones are left unset.
+    for name in _appose_outputs:
+        if name in g:
+            task.outputs[name] = _appose_pack(g[name])
+
+
+_appose_run()
