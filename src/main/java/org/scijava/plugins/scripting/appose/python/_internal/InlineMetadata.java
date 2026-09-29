@@ -40,6 +40,7 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import com.fasterxml.jackson.core.io.JsonStringEncoder;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.dataformat.toml.TomlMapper;
@@ -175,7 +176,9 @@ public final class InlineMetadata {
 		}
 
 		try {
-			return mapper.writeValueAsString(pyproject);
+			final StringBuilder sb = new StringBuilder();
+			writeTable(mapper, pyproject, null, sb);
+			return sb.toString();
 		}
 		catch (final IOException e) {
 			throw new IllegalArgumentException(
@@ -247,6 +250,40 @@ public final class InlineMetadata {
 		table.fieldNames().forEachRemaining(key -> {
 			if (!allowedKeys.contains(key)) unsupported.add(prefix + "." + key);
 		});
+	}
+
+	/**
+	 * Writes the given table as TOML, using a {@code [header]} per table rather
+	 * than the dotted keys that {@link TomlMapper} would produce, since some
+	 * pixi versions (e.g. 0.58) do not recognize {@code tool.pixi.workspace}
+	 * written in dotted form.
+	 */
+	private static void writeTable(final TomlMapper mapper, final JsonNode table,
+		final String path, final StringBuilder sb) throws IOException
+	{
+		final List<Map.Entry<String, JsonNode>> subtables = new ArrayList<>();
+		final ObjectNode values = mapper.createObjectNode();
+		table.fields().forEachRemaining(field -> {
+			if (field.getValue().isObject()) subtables.add(field);
+			else values.set(field.getKey(), field.getValue());
+		});
+		if (path != null && (!values.isEmpty() || subtables.isEmpty())) {
+			if (sb.length() > 0) sb.append('\n');
+			sb.append('[').append(path).append("]\n");
+		}
+		if (!values.isEmpty()) sb.append(mapper.writeValueAsString(values));
+		for (final Map.Entry<String, JsonNode> subtable : subtables) {
+			final String key = tomlKey(subtable.getKey());
+			writeTable(mapper, subtable.getValue(),
+				path == null ? key : path + "." + key, sb);
+		}
+	}
+
+	/** Quotes the given key if it is not a valid TOML bare key. */
+	private static String tomlKey(final String key) {
+		if (key.matches("[A-Za-z0-9_-]+")) return key;
+		return '"' + new String(JsonStringEncoder.getInstance().quoteAsString(
+			key)) + '"';
 	}
 
 	/** Removes the comment prefix from each line, as the specification says. */

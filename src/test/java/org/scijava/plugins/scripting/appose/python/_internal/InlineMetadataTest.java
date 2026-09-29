@@ -36,6 +36,10 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.dataformat.toml.TomlMapper;
 
@@ -123,6 +127,26 @@ public class InlineMetadataTest {
 			pixi.get("workspace").get("channels").get(0).asText());
 		assertEquals(InlineMetadata.condaPlatform(),
 			pixi.get("workspace").get("platforms").get(0).asText());
+	}
+
+	@Test
+	public void testToPyProjectUsesTableHeaders() {
+		// Older pixi versions (e.g. 0.58) do not recognize a pixi manifest
+		// written with dotted keys, such as tool.pixi.workspace.channels.
+		final String toml = InlineMetadata.toPyProject(String.join("\n", //
+			"[tool.pixi.dependencies]", //
+			"numpy = \"*\"", //
+			"[tool.pixi.pypi-dependencies.\"my.pkg\"]", //
+			"path = \".\"", //
+			""), "my-env");
+		final List<String> headers = new ArrayList<>();
+		for (final String line : toml.split("\n")) {
+			if (line.startsWith("[")) headers.add(line);
+			else if (!line.isEmpty()) assertFalse(line, line.split(" = ")[0].contains("."));
+		}
+		assertEquals(Arrays.asList("[project]", "[tool.pixi.dependencies]",
+			"[tool.pixi.pypi-dependencies.\"my.pkg\"]", "[tool.pixi.workspace]"),
+			headers);
 	}
 
 	@Test
