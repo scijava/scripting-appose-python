@@ -115,6 +115,17 @@ Because stderr is read separately from stdout, the wrapper writes a unique
 end-marker line to stderr, and the engine waits up to 2 s for it before
 returning, so that late stderr lines are not lost or misattributed.
 
+The same lines, plus `task.update` messages and the traceback of a failed
+run, also go to the run's SciJava task logger (`Task#log()`), and a
+build's tool output goes to the build task's logger. The task monitor's log
+window shows them.
+
+**Tradeoff:** Task loggers retain nothing, so the log window shows only what
+is logged after it is opened. And since the task monitor drops tasks as soon
+as they finish, a build that fails quickly cannot have its log opened at
+all; its error message is the
+only record. If this proves annoying, `DefaultTask` could keep a history.
+
 **Fragile because:** The whole mechanism depends on debug message formats,
 which are not API. Appose core should offer structured stdout/stderr
 callbacks on `Service`, ideally tagged by task (see

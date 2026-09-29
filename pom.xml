@@ -91,6 +91,9 @@
 
 		<appose.version>0.12.0</appose.version>
 		<imglib2-appose.version>0.9.0</imglib2-appose.version>
+
+		<!-- TEMP: for Task#log(); drop once propagated to pom-scijava. -->
+		<scijava-common.version>2.101.0</scijava-common.version>
 	</properties>
 
 	<dependencies>

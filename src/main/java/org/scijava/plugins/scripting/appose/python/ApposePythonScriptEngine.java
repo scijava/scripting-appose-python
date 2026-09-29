@@ -67,6 +67,7 @@ import org.scijava.Context;
 import org.scijava.app.StatusService;
 import org.scijava.convert.ConvertService;
 import org.scijava.log.LogService;
+import org.scijava.log.Logger;
 import org.scijava.module.ModuleItem;
 import org.scijava.plugin.Parameter;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorker;
@@ -254,6 +255,7 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 			});
 			progress = SciJavaTasks.track(taskService, statusService, "Running " +
 				scriptName(info), task, worker::kill);
+			if (progress != null) forwarder.taskLog = progress.log();
 			try {
 				task.waitFor();
 			}
@@ -281,6 +283,7 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 				// which would say the worker crashed if it had to be stopped.
 				throw new ScriptException("Python script canceled");
 			}
+			if (progress != null) progress.log().error(e.getMessage());
 			throw scriptException("Python script failed: " + e.getMessage(), e);
 		}
 		catch (final InterruptedException e) {
@@ -309,7 +312,8 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 
 	/**
 	 * Forwards the worker process's stdout (other than Appose protocol
-	 * messages) and stderr to the script context's writers.
+	 * messages) and stderr to the script context's writers, and to the run's
+	 * task logger, if any.
 	 * <p>
 	 * Note: This relies on the format of Appose's debug messages: stderr lines
 	 * arrive as {@code [WORKER-n] line} and non-protocol stdout lines as
@@ -326,6 +330,9 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 			"]";
 		private final CountDownLatch ended = new CountDownLatch(1);
 
+		/** Logger of the run's SciJava task, if any. */
+		private volatile Logger taskLog;
+
 		@Override
 		public void accept(final String message) {
 			final int end = message.indexOf("] ");
@@ -334,11 +341,19 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 			final String line = message.substring(end + 2);
 			if (prefix.startsWith("[WORKER-")) {
 				if (line.equals(endMarker)) ended.countDown();
-				else writeLine(getContext().getErrorWriter(), line);
+				else output(getContext().getErrorWriter(), line);
 			}
 			else if (prefix.startsWith("[SERVICE-") && line.startsWith("<INVALID> ")) {
-				writeLine(getContext().getWriter(), line.substring(10));
+				output(getContext().getWriter(), line.substring(10));
 			}
+		}
+
+		private void output(final Writer writer, final String line) {
+			writeLine(writer, line);
+			// Note: Info level for stderr too, since Python writes ordinary
+			// output there as well, e.g. via the logging module.
+			final Logger logger = taskLog;
+			if (logger != null) logger.info(line);
 		}
 
 		/** Waits until the wrapper script's stderr output has all arrived. */

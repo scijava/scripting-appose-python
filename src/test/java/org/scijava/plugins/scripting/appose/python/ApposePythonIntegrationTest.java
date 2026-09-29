@@ -43,10 +43,13 @@ import java.io.StringWriter;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
@@ -63,6 +66,8 @@ import org.junit.Test;
 import org.scijava.Context;
 import org.scijava.event.EventHandler;
 import org.scijava.event.EventService;
+import org.scijava.log.LogLevel;
+import org.scijava.log.LogMessage;
 import org.scijava.module.ModuleService;
 import org.scijava.plugins.scripting.appose.python._internal.SciJavaTasks;
 import org.scijava.script.ScriptInfo;
@@ -176,6 +181,11 @@ public class ApposePythonIntegrationTest {
 			"print('to stderr', file=sys.stderr)\n", new HashMap<>());
 		assertTrue(out.toString(), out.toString().contains("to stdout"));
 		assertTrue(err.toString(), err.toString().contains("to stderr"));
+
+		// The output also goes to the run's task log.
+		final List<String> lines = tasks.log("Running print.py", LogLevel.INFO);
+		assertTrue(lines.toString(), lines.contains("to stdout"));
+		assertTrue(lines.toString(), lines.contains("to stderr"));
 	}
 
 	@Test
@@ -189,6 +199,10 @@ public class ApposePythonIntegrationTest {
 		assertTrue(error, error.contains(new File(scriptDir, "failing.py").getPath()));
 		assertTrue(error, error.contains("line 5"));
 		assertNull(module.getOutput("x"));
+
+		final List<String> errors = tasks.log("Running failing.py", LogLevel.ERROR);
+		assertEquals(1, errors.size());
+		assertTrue(errors.get(0), errors.get(0).contains("ValueError: boom"));
 	}
 
 	@Test
@@ -260,6 +274,8 @@ public class ApposePythonIntegrationTest {
 		assertNotNull(task);
 		assertTrue(task.isDone());
 		assertEquals(2, task.getProgressMaximum());
+		assertEquals(Collections.singletonList("halfway"), tasks.log(
+			"Running tracked.py", LogLevel.INFO));
 	}
 
 	@Test
@@ -331,14 +347,31 @@ public class ApposePythonIntegrationTest {
 	public static class TaskRecorder {
 
 		private final Map<String, Task> tasks = new ConcurrentHashMap<>();
+		private final Map<Task, List<LogMessage>> logs = new ConcurrentHashMap<>();
 
 		@EventHandler
 		public void onEvent(final TaskEvent event) {
-			tasks.put(event.getTask().getName(), event.getTask());
+			final Task task = event.getTask();
+			tasks.put(task.getName(), task);
+			// Note: A task's first event arrives before it produces any output.
+			logs.computeIfAbsent(task, t -> {
+				final List<LogMessage> messages = new CopyOnWriteArrayList<>();
+				t.log().addLogListener(messages::add);
+				return messages;
+			});
 		}
 
 		public Task find(final String name) {
 			return tasks.get(name);
+		}
+
+		/** Gets the lines logged to the named task at the given level. */
+		public List<String> log(final String name, final int level) {
+			final List<String> lines = new ArrayList<>();
+			for (final LogMessage message : logs.get(find(name))) {
+				if (message.level() == level) lines.add(message.text());
+			}
+			return lines;
 		}
 
 		public Task await(final String name) throws InterruptedException {

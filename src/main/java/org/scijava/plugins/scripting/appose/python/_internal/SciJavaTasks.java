@@ -60,7 +60,8 @@ public final class SciJavaTasks {
 
 	/**
 	 * Creates a {@link BuildListener} that shows each environment build as a
-	 * SciJava task of its own, and logs the build tool's output at debug level.
+	 * SciJava task of its own. The build tool's output goes to the task's
+	 * logger, and to the application log at debug level.
 	 * <p>
 	 * A build gets its own task, rather than borrowing that of the run which
 	 * needs it, because a build can take minutes: a run stuck at 0% for that
@@ -107,21 +108,30 @@ public final class SciJavaTasks {
 
 			@Override
 			public void buildOutput(final String envName, final String text) {
-				if (log != null) log.debug(text.trim());
+				output(envName, text);
 			}
 
 			@Override
 			public void buildError(final String envName, final String text) {
-				// Note: Not log.error! Build tools write ordinary status to stderr.
-				if (log != null) log.debug(text.trim());
+				// Note: Not error level! Build tools write ordinary status to stderr.
+				output(envName, text);
+			}
+
+			private void output(final String envName, final String text) {
+				final String line = chomp(text);
+				if (log != null) log.debug(line);
+				final Task task = building.get(envName);
+				if (task != null) task.log().info(line);
 			}
 
 			@Override
 			public void buildFinished(final String envName, final Throwable error) {
 				final Task task = building.remove(envName);
 				if (task != null) {
-					if (error != null) task.setStatusMessage("Failed: " + error
-						.getMessage());
+					if (error != null) {
+						task.setStatusMessage("Failed: " + error.getMessage());
+						task.log().error("Build failed", error);
+					}
 					task.finish();
 				}
 				if (status != null) status.clearStatus();
@@ -163,7 +173,10 @@ public final class SciJavaTasks {
 			if (event.responseType.isTerminal()) finished.set(true);
 			if (event.responseType != ResponseType.UPDATE) return;
 			if (task != null) {
-				if (event.message != null) task.setStatusMessage(event.message);
+				if (event.message != null) {
+					task.setStatusMessage(event.message);
+					task.log().info(event.message);
+				}
 				task.setProgressValue(event.current);
 				task.setProgressMaximum(event.maximum);
 			}
@@ -193,5 +206,10 @@ public final class SciJavaTasks {
 		task.setStatusMessage("Running");
 		task.start();
 		return task;
+	}
+
+	/** Strips trailing line breaks, keeping any indentation. */
+	private static String chomp(final String text) {
+		return text.replaceAll("[\\r\\n]+$", "");
 	}
 }
