@@ -32,6 +32,8 @@ package org.scijava.plugins.scripting.appose.python;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -44,6 +46,9 @@ import java.nio.file.Files;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import net.imglib2.appose.ShmImg;
 import net.imglib2.img.Img;
@@ -56,9 +61,14 @@ import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.scijava.Context;
+import org.scijava.event.EventHandler;
+import org.scijava.event.EventService;
 import org.scijava.module.ModuleService;
+import org.scijava.plugins.scripting.appose.python._internal.SciJavaTasks;
 import org.scijava.script.ScriptInfo;
 import org.scijava.script.ScriptModule;
+import org.scijava.task.Task;
+import org.scijava.task.event.TaskEvent;
 
 /**
  * End-to-end tests of {@link ApposePythonScriptEngine}, running real Python
@@ -77,6 +87,7 @@ public class ApposePythonIntegrationTest {
 
 	private static Context context;
 	private static File scriptDir;
+	private static TaskRecorder tasks;
 
 	private StringWriter out;
 	private StringWriter err;
@@ -84,6 +95,8 @@ public class ApposePythonIntegrationTest {
 	@BeforeClass
 	public static void setUp() throws URISyntaxException {
 		context = new Context();
+		tasks = new TaskRecorder();
+		context.service(EventService.class).subscribe(tasks);
 		scriptDir = new File(ApposePythonIntegrationTest.class.getResource(
 			"/appose-test/requirements.txt").toURI()).getParentFile();
 	}
@@ -213,8 +226,95 @@ public class ApposePythonIntegrationTest {
 		assertEquals(file.getAbsolutePath(), module.getOutput("path"));
 	}
 
+	@Test
+	public void testWorkerIsReused() throws Exception {
+		final int first = pid();
+		assertEquals(first, pid());
+	}
+
+	@Test
+	public void testFreshNamespacePerRun() throws Exception {
+		run("leave", HEADER + "leftover = 1\n", new HashMap<>());
+		final ScriptModule module = run("check", HEADER + //
+			"#@output boolean seen\n" + //
+			"seen = 'leftover' in globals()\n", new HashMap<>());
+		assertEquals("", err.toString());
+		assertEquals(false, module.getOutput("seen"));
+	}
+
+	@Test
+	public void testExportPersistsAcrossRuns() throws Exception {
+		run("export", HEADER + "task.export(cached=41)\n", new HashMap<>());
+		final ScriptModule module = run("use", HEADER + //
+			"#@output int value\n" + //
+			"value = cached + 1\n", new HashMap<>());
+		assertEquals("", err.toString());
+		assertEquals(42, module.getOutput("value"));
+	}
+
+	@Test
+	public void testRunIsSciJavaTask() throws Exception {
+		run("tracked", HEADER + //
+			"task.update('halfway', current=1, maximum=2)\n", new HashMap<>());
+		final Task task = tasks.find("Running tracked.py");
+		assertNotNull(task);
+		assertTrue(task.isDone());
+		assertEquals(2, task.getProgressMaximum());
+	}
+
+	@Test
+	public void testCancelCooperativeScript() throws Exception {
+		final int before = pid();
+		final Future<?> future = runAsync("polite", HEADER + //
+			"import time\n" + //
+			"while not task.cancel_requested:\n" + //
+			"    time.sleep(0.05)\n");
+		tasks.await("Running polite.py").cancel("test");
+		future.get(10, TimeUnit.SECONDS);
+		// The script stopped by itself, so its worker was left alive.
+		assertEquals(before, pid());
+	}
+
+	@Test
+	public void testCancelUncooperativeScript() throws Exception {
+		final int before = pid();
+		final Future<?> future = runAsync("stubborn", HEADER + //
+			"import time\n" + //
+			"while True:\n" + //
+			"    time.sleep(0.05)\n");
+		tasks.await("Running stubborn.py").cancel("test");
+		future.get(SciJavaTasks.CANCEL_GRACE_MILLIS + 10000, TimeUnit.MILLISECONDS);
+		assertTrue(err.toString(), err.toString().contains("canceled"));
+		// The worker had to be stopped; the next run gets a new one.
+		assertNotEquals(before, pid());
+	}
+
+	private int pid() throws Exception {
+		final ScriptModule module = run("pid", HEADER + //
+			"#@output int pid\n" + //
+			"import os\n" + //
+			"pid = os.getpid()\n", new HashMap<>());
+		return (Integer) module.getOutput("pid");
+	}
+
 	private ScriptModule run(final String name, final String script,
 		final Map<String, Object> inputs) throws Exception
+	{
+		final ModuleService moduleService = context.service(ModuleService.class);
+		final ScriptModule module = module(name, script);
+		moduleService.run(module, true, inputs).get();
+		return module;
+	}
+
+	private Future<?> runAsync(final String name, final String script)
+		throws Exception
+	{
+		final ModuleService moduleService = context.service(ModuleService.class);
+		return moduleService.run(module(name, script), true, new HashMap<>());
+	}
+
+	private ScriptModule module(final String name, final String script)
+		throws Exception
 	{
 		final File scriptFile = writeScript(name, script);
 		final ScriptInfo info = new ScriptInfo(context, scriptFile);
@@ -224,8 +324,32 @@ public class ApposePythonIntegrationTest {
 		err = new StringWriter();
 		module.setOutputWriter(out);
 		module.setErrorWriter(err);
-		moduleService.run(module, true, inputs).get();
 		return module;
+	}
+
+	/** Records the SciJava tasks that have been started. */
+	public static class TaskRecorder {
+
+		private final Map<String, Task> tasks = new ConcurrentHashMap<>();
+
+		@EventHandler
+		public void onEvent(final TaskEvent event) {
+			tasks.put(event.getTask().getName(), event.getTask());
+		}
+
+		public Task find(final String name) {
+			return tasks.get(name);
+		}
+
+		public Task await(final String name) throws InterruptedException {
+			final long deadline = System.currentTimeMillis() + 10000;
+			while (System.currentTimeMillis() < deadline) {
+				final Task task = tasks.get(name);
+				if (task != null && !task.isDone()) return task;
+				Thread.sleep(50);
+			}
+			throw new AssertionError("No running task named " + name);
+		}
 	}
 
 	private static File writeScript(final String name, final String script)

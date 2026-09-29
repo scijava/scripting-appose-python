@@ -48,7 +48,31 @@ restarts. Environments are stored in the Appose environments directory
 Scripts that share a configuration file share an environment. Editing the file
 causes the environment to be updated on the next run.
 
-Each script run starts a fresh Python process.
+Builds appear in the application's task list, with their progress, so a
+long first build does not look like a hang.
+
+## Python workers
+
+Each environment gets one Python worker process, which stays alive between
+script runs. Modules a script imports stay imported, so a second run of a
+script that imports e.g. PyTorch starts quickly. Each run still gets a fresh
+namespace: variables from one run are not visible to the next.
+
+To keep something expensive, such as a loaded model, across runs, hand it
+to `task.export`:
+
+```python
+if "model" not in globals():
+    model = load_model()
+    task.export(model=model)
+```
+
+Runs on the same environment execute one at a time. Each run appears in the
+application's task list, where it can be canceled. A script can notice
+cancelation by checking `task.cancel_requested`; if it has not stopped a few
+seconds after being canceled, its worker process is stopped, and the next
+run starts a new one. The worker, and whatever memory (including GPU
+memory) it holds, is otherwise released when the application exits.
 
 ## Inputs and outputs
 

@@ -35,11 +35,21 @@
 #   _appose_script_path  -- file name to report in tracebacks
 #   _appose_array_inputs -- names of inputs passed as appose.NDArray
 #   _appose_outputs      -- names of declared script outputs
+#   _appose_end_marker   -- line to write to stderr once the script is done
+#
+# The worker process is reused across runs, but each run gets a fresh
+# namespace. Objects passed to task.export(...) remain available to later
+# runs, e.g. to keep a loaded model around:
+#
+#   if "model" not in globals():
+#       model = load_model()
+#       task.export(model=model)
 #
 # Note: The user script is compiled with its real file name, so tracebacks
 # point to the correct file and line number.
 
 import ast as _appose_ast
+import sys as _appose_sys
 
 
 def _appose_pack(value):
@@ -85,4 +95,10 @@ def _appose_run():
             task.outputs[name] = _appose_pack(g[name])
 
 
-_appose_run()
+try:
+    _appose_run()
+finally:
+    # Note: The worker's stderr is read separately from its stdout, so this
+    # tells the Java side when all of this run's stderr output has arrived.
+    _appose_sys.stdout.flush()
+    print(_appose_end_marker, file=_appose_sys.stderr, flush=True)

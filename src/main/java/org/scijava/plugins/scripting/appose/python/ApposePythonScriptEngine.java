@@ -43,7 +43,11 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Lock;
+import java.util.function.Consumer;
 
 import javax.script.Bindings;
 import javax.script.ScriptEngine;
@@ -55,9 +59,9 @@ import net.imglib2.appose.WrappedNDArray;
 import org.apposed.appose.Appose;
 import org.apposed.appose.BuildException;
 import org.apposed.appose.Builder;
-import org.apposed.appose.Environment;
 import org.apposed.appose.NDArray;
 import org.apposed.appose.Service;
+import org.apposed.appose.Service.TaskStatus;
 import org.apposed.appose.TaskException;
 import org.scijava.Context;
 import org.scijava.app.StatusService;
@@ -65,9 +69,14 @@ import org.scijava.convert.ConvertService;
 import org.scijava.log.LogService;
 import org.scijava.module.ModuleItem;
 import org.scijava.plugin.Parameter;
+import org.scijava.plugins.scripting.appose.python._internal.ResidentWorker;
+import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerService;
+import org.scijava.plugins.scripting.appose.python._internal.SciJavaTasks;
 import org.scijava.script.AbstractScriptEngine;
 import org.scijava.script.ScriptInfo;
 import org.scijava.script.ScriptModule;
+import org.scijava.task.Task;
+import org.scijava.task.TaskService;
 
 /**
  * A script engine for Python (CPython, not Jython!), backed by
@@ -79,8 +88,12 @@ import org.scijava.script.ScriptModule;
  * #@script(env="myenv.toml", scheme="pixi.toml")
  * </pre>
  * <p>
- * The engine lazily builds the environment on first use and caches it for
- * subsequent calls. Inputs of array-compatible types (e.g., ImgLib2 {@code Img})
+ * The engine lazily builds the environment on first use, and keeps one Python
+ * worker process per environment alive across script runs, so that imported
+ * modules, and objects a script keeps via {@code task.export(...)}, need not
+ * be loaded again. Each run still gets a fresh namespace. Builds and runs
+ * appear as SciJava {@link Task}s, and canceling a run's task cancels the
+ * script. Inputs of array-compatible types (e.g., ImgLib2 {@code Img})
  * are automatically converted to Appose {@link NDArray} before being passed to
  * Python, and back again on the output side. Both conversions are delegated to
  * SciJava's {@link ConvertService}, so they work for any type that has a
@@ -104,9 +117,11 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 	/** Appose task script that runs the user script; see wrapper.py. */
 	private static final String WRAPPER_SCRIPT = loadWrapperScript();
 
-	/** Built environments, keyed by name, scheme and configuration content. */
-	private static final Map<String, Environment> ENVIRONMENTS =
-		new ConcurrentHashMap<>();
+	/**
+	 * How long to wait, after a run finishes, for the rest of its stderr output
+	 * to arrive.
+	 */
+	private static final long OUTPUT_DRAIN_MILLIS = 2000;
 
 	@Parameter
 	private ConvertService convertService;
@@ -114,8 +129,14 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 	@Parameter
 	private LogService log;
 
+	@Parameter
+	private ResidentWorkerService workerService;
+
 	@Parameter(required = false)
 	private StatusService statusService;
+
+	@Parameter(required = false)
+	private TaskService taskService;
 
 	public ApposePythonScriptEngine(final Context context) {
 		context.inject(this);
@@ -133,8 +154,8 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 		final ScriptInfo info = moduleObj instanceof ScriptModule ?
 			((ScriptModule) moduleObj).getInfo() : null;
 
-		// Build (or retrieve from cache) the Appose environment.
-		final Environment env = buildEnvironment(info);
+		// Retrieve the resident worker for the script's environment.
+		final ResidentWorker worker = worker(info);
 
 		// Collect declared inputs, converting array-like values to NDArray.
 		final Map<String, Object> taskInputs = new HashMap<>();
@@ -173,7 +194,7 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 			taskInputs.put("_appose_array_inputs", arrayInputNames);
 			taskInputs.put("_appose_outputs", outputNames);
 
-			return runTask(env, taskInputs, info);
+			return runTask(worker, taskInputs, info);
 		}
 		finally {
 			ownedNDArrays.forEach(NDArray::close);
@@ -202,32 +223,45 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 	// -- Helper methods --
 
 	/**
-	 * Runs the wrapped script as an Appose task, storing its outputs into the
-	 * engine bindings.
+	 * Runs the wrapped script as an Appose task on the environment's resident
+	 * worker, storing its outputs into the engine bindings.
 	 *
 	 * @return The value of the script's last expression, if any.
 	 */
-	private Object runTask(final Environment env,
+	private Object runTask(final ResidentWorker worker,
 		final Map<String, Object> taskInputs, final ScriptInfo info)
 		throws ScriptException
 	{
-		// Note: On Windows, importing numpy from a task hangs unless numpy
-		// was imported during worker initialization.
-		final Service python = env.python()
-			.init("try:\n    import numpy\nexcept ImportError:\n    pass\n");
-		python.debug(this::forwardWorkerOutput);
-		boolean started = false;
+		// Note: Runs on a worker are serialized, because its output cannot
+		// otherwise be attributed to the script that produced it.
+		final Lock lock = worker.exclusive();
 		try {
-			final Service.Task task = python.task(WRAPPER_SCRIPT, taskInputs);
-			started = true;
+			lock.lockInterruptibly();
+		}
+		catch (final InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new ScriptException("Python script interrupted");
+		}
+		final OutputForwarder forwarder = new OutputForwarder();
+		taskInputs.put("_appose_end_marker", forwarder.endMarker);
+		worker.debug(forwarder);
+		Service.Task task = null;
+		Task progress = null;
+		try {
+			task = worker.task(WRAPPER_SCRIPT, taskInputs);
 			task.listen(event -> {
 				if (event.message != null) log.info("[appose-python] " + event.message);
-				if (event.maximum > 0 && statusService != null) {
-					statusService.showStatus((int) event.current, (int) event.maximum,
-						event.message);
-				}
 			});
-			task.waitFor();
+			progress = SciJavaTasks.track(taskService, statusService, "Running " +
+				scriptName(info), task, worker::kill);
+			try {
+				task.waitFor();
+			}
+			finally {
+				if (task.status == TaskStatus.COMPLETE || task.status == TaskStatus.FAILED) {
+					forwarder.awaitEnd();
+				}
+			}
 
 			// Unmarshal outputs from task.outputs back into engine bindings.
 			for (final ModuleItem<?> item : info.outputs()) {
@@ -237,37 +271,40 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 			}
 			return unmarshal(task.outputs.get(RETURN_VALUE_KEY), Object.class);
 		}
+		catch (final BuildException e) {
+			throw scriptException("Failed to build Appose environment '" + worker
+				.name() + "': " + e.getMessage(), e);
+		}
 		catch (final TaskException e) {
+			if (progress != null && progress.isCanceled()) {
+				// Note: No cause, since ScriptModule reports the innermost cause,
+				// which would say the worker crashed if it had to be stopped.
+				throw new ScriptException("Python script canceled");
+			}
 			throw scriptException("Python script failed: " + e.getMessage(), e);
 		}
 		catch (final InterruptedException e) {
-			python.kill();
+			worker.kill();
 			Thread.currentThread().interrupt();
 			throw new ScriptException("Python script interrupted");
 		}
 		catch (final RuntimeException e) {
 			// E.g. UncheckedIOException when the worker process fails to launch.
-			if (python.isAlive()) python.kill();
+			worker.kill();
 			throw scriptException("Python script failed: " + e.getMessage(), e);
 		}
 		finally {
-			if (started) shutDown(python);
+			worker.debug(null);
+			if (progress != null) progress.finish();
+			if (statusService != null) statusService.clearStatus();
+			lock.unlock();
 		}
 	}
 
-	/**
-	 * Shuts down the worker process, waiting until all of its output has been
-	 * forwarded to the script context's writers.
-	 */
-	private void shutDown(final Service python) {
-		python.close();
-		try {
-			python.waitFor();
-		}
-		catch (final InterruptedException e) {
-			python.kill();
-			Thread.currentThread().interrupt();
-		}
+	/** Gets a human-friendly name for the given script. */
+	private static String scriptName(final ScriptInfo info) {
+		final String path = info.getPath();
+		return path == null ? "script" : new File(path).getName();
 	}
 
 	/**
@@ -279,16 +316,34 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 	 * {@code [SERVICE-n] <INVALID> line}.
 	 * </p>
 	 */
-	private void forwardWorkerOutput(final String message) {
-		final int end = message.indexOf("] ");
-		if (end < 0) return;
-		final String prefix = message.substring(0, end);
-		final String line = message.substring(end + 2);
-		if (prefix.startsWith("[WORKER-")) {
-			writeLine(getContext().getErrorWriter(), line);
+	private class OutputForwarder implements Consumer<String> {
+
+		/**
+		 * Line the wrapper script writes to stderr when it is done, since stderr
+		 * lines may still arrive after the task has reported completion.
+		 */
+		private final String endMarker = "[appose-python-end " + UUID.randomUUID() +
+			"]";
+		private final CountDownLatch ended = new CountDownLatch(1);
+
+		@Override
+		public void accept(final String message) {
+			final int end = message.indexOf("] ");
+			if (end < 0) return;
+			final String prefix = message.substring(0, end);
+			final String line = message.substring(end + 2);
+			if (prefix.startsWith("[WORKER-")) {
+				if (line.equals(endMarker)) ended.countDown();
+				else writeLine(getContext().getErrorWriter(), line);
+			}
+			else if (prefix.startsWith("[SERVICE-") && line.startsWith("<INVALID> ")) {
+				writeLine(getContext().getWriter(), line.substring(10));
+			}
 		}
-		else if (prefix.startsWith("[SERVICE-") && line.startsWith("<INVALID> ")) {
-			writeLine(getContext().getWriter(), line.substring(10));
+
+		/** Waits until the wrapper script's stderr output has all arrived. */
+		private void awaitEnd() throws InterruptedException {
+			ended.await(OUTPUT_DRAIN_MILLIS, TimeUnit.MILLISECONDS);
 		}
 	}
 
@@ -323,7 +378,13 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 		if (type.isInstance(nd)) return nd;
 		final Object converted = convertService.convert(nd, type);
 		if (converted == null) return nd;
-		if (converted != nd) nd.close();
+		if (converted != nd) {
+			// Note: By Appose convention, the service side frees shared memory,
+			// even when the worker allocated it. The worker also stays alive
+			// after the run, so nothing else would ever free this block.
+			nd.shm().unlinkOnClose(true);
+			nd.close();
+		}
 		return converted;
 	}
 
@@ -363,12 +424,12 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 	}
 
 	/**
-	 * Lazily builds the Appose {@link Environment} described by the {@code env}
-	 * and {@code scheme} attributes of the script's {@code #@script} directive.
+	 * Gets the resident worker for the Appose environment described by the
+	 * {@code env} and {@code scheme} attributes of the script's
+	 * {@code #@script} directive. The environment itself is built lazily, by
+	 * the worker's first task.
 	 */
-	private Environment buildEnvironment(final ScriptInfo info)
-		throws ScriptException
-	{
+	private ResidentWorker worker(final ScriptInfo info) throws ScriptException {
 		final String envRef = info == null ? null : info.get("env");
 		if (envRef == null) {
 			throw new ScriptException(
@@ -393,37 +454,14 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 		final String envName = envName(envFile);
 		final String scheme = info.get("scheme");
 
-		final String key = envName + "\n" + scheme + "\n" + content;
-		final Environment cached = ENVIRONMENTS.get(key);
-		if (cached != null) return cached;
-
-		// Note: Builds are serialized, so that concurrent runs of the
-		// same script do not trample the same environment directory.
-		synchronized (ENVIRONMENTS) {
-			final Environment env = ENVIRONMENTS.get(key);
-			if (env != null) return env;
-
-			log.info("[appose-python] Building environment '" + envName +
-				"' from " + envFile);
-			try {
-				Builder<?> builder = Appose.content(content);
-				if (scheme != null) builder = builder.scheme(scheme);
-				builder = builder.name(envName)
-					.subscribeOutput(s -> log.debug(s.trim()))
-					.subscribeError(s -> log.debug(s.trim()));
-				if (statusService != null) {
-					builder = builder.subscribeProgress((title, cur, max) -> statusService
-						.showStatus((int) cur, (int) max, title));
-				}
-				final Environment built = builder.build();
-				ENVIRONMENTS.put(key, built);
-				return built;
-			}
-			catch (final BuildException | RuntimeException e) {
-				throw scriptException("Failed to build Appose environment '" +
-					envName + "' from " + envFile + ": " + e.getMessage(), e);
-			}
-		}
+		return workerService.worker(envName, scheme + "\n" + content, () -> {
+			Builder<?> builder = Appose.content(content);
+			if (scheme != null) builder = builder.scheme(scheme);
+			// Note: On Windows, importing numpy from a task hangs unless numpy
+			// was imported during worker initialization.
+			return new ResidentWorker(envName, builder.name(envName), env -> env
+				.python().init("try:\n    import numpy\nexcept ImportError:\n    pass\n"));
+		});
 	}
 
 	/** Resolves an (optionally relative) env file path against the script path. */
