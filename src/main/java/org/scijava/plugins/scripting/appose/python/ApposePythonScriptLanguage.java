@@ -46,7 +46,7 @@ import org.scijava.script.ScriptLanguage;
  * @see ScriptEngine
  */
 @Plugin(type = ScriptLanguage.class, name = "appose-python",
-	priority = Priority.VERY_LOW)
+	label = "Python (Appose)", priority = Priority.VERY_LOW)
 public class ApposePythonScriptLanguage extends AbstractScriptLanguage {
 
 	@Override
