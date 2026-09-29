@@ -339,7 +339,7 @@ public class ApposePythonIntegrationTest {
 	{
 		final ModuleService moduleService = context.service(ModuleService.class);
 		final ScriptModule module = module(name, script);
-		moduleService.run(module, true, inputs).get();
+		moduleService.run(module, false, inputs).get();
 		return module;
 	}
 
@@ -347,7 +347,7 @@ public class ApposePythonIntegrationTest {
 		throws Exception
 	{
 		final ModuleService moduleService = context.service(ModuleService.class);
-		return moduleService.run(module(name, script), true, new HashMap<>());
+		return moduleService.run(module(name, script), false, new HashMap<>());
 	}
 
 	private ScriptModule module(final String name, final String script)
