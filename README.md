@@ -67,7 +67,9 @@ if "model" not in globals():
     task.export(model=model)
 ```
 
-Runs on the same environment execute one at a time. Each run appears in the
+Runs on the same worker execute one at a time; since each environment
+currently gets a single worker, so do runs on the same environment, while
+runs on different environments proceed in parallel. Each run appears in the
 application's task list, where it can be canceled. A script can notice
 cancelation by checking `task.cancel_requested`; if it has not stopped a few
 seconds after being canceled, its worker process is stopped, and the next

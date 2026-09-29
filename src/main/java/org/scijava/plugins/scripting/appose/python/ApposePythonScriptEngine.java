@@ -273,7 +273,7 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 		}
 		catch (final BuildException e) {
 			throw scriptException("Failed to build Appose environment '" + worker
-				.name() + "': " + e.getMessage(), e);
+				.environment().name() + "': " + e.getMessage(), e);
 		}
 		catch (final TaskException e) {
 			if (progress != null && progress.isCanceled()) {
@@ -455,13 +455,13 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 		final String scheme = info.get("scheme");
 
 		return workerService.worker(envName, scheme + "\n" + content, () -> {
-			Builder<?> builder = Appose.content(content);
-			if (scheme != null) builder = builder.scheme(scheme);
+			final Builder<?> builder = Appose.content(content);
+			return scheme == null ? builder : builder.scheme(scheme);
+		},
 			// Note: On Windows, importing numpy from a task hangs unless numpy
 			// was imported during worker initialization.
-			return new ResidentWorker(envName, builder.name(envName), env -> env
-				.python().init("try:\n    import numpy\nexcept ImportError:\n    pass\n"));
-		});
+			env -> env.python().init(
+				"try:\n    import numpy\nexcept ImportError:\n    pass\n"));
 	}
 
 	/** Resolves an (optionally relative) env file path against the script path. */

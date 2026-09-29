@@ -31,23 +31,19 @@ package org.scijava.plugins.scripting.appose.python._internal;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
 import org.apposed.appose.BuildException;
-import org.apposed.appose.Builder;
 import org.apposed.appose.Environment;
 import org.apposed.appose.Service;
 
 /**
- * An Appose worker that stays resident across tasks: its environment is
- * built on first use, its worker process is started once and reused, and
- * both are released only on request.
+ * An Appose worker process that stays resident across tasks: it is started
+ * on first use, reused afterward, and ended only on request.
  * <p>
  * Keeping the worker alive is what makes repeated runs fast: modules the
  * worker has imported stay imported, and objects a task hands to
@@ -57,46 +53,35 @@ import org.apposed.appose.Service;
  * free it.
  * </p>
  * <p>
- * If the worker dies (e.g. it crashes, or {@link #kill()} is called), the
- * next task transparently starts a new one.
+ * A worker runs in a {@link LazyEnvironment}, which it builds if needed; any
+ * number of workers may share one environment. If the worker dies (e.g. it
+ * crashes, or {@link #kill()} is called), the next task transparently starts
+ * a new process.
  * </p>
  */
 public class ResidentWorker implements AutoCloseable {
 
-	private final String name;
-	private final Builder<?> builder;
+	private final LazyEnvironment environment;
 	private final Function<Environment, Service> launcher;
-	private final List<BuildListener> listeners = new CopyOnWriteArrayList<>();
 	private final Lock exclusive = new ReentrantLock();
 
 	private volatile Consumer<String> debug;
-	private Environment env;
 	private Service service;
 
 	/**
-	 * @param name Name of the environment, as reported to listeners.
-	 * @param builder Builder for the environment; built on first use.
+	 * @param environment Environment the worker runs in.
 	 * @param launcher Creates the worker's service from the built environment,
 	 *          e.g. {@code env -> env.python().init("import numpy")}.
 	 */
-	public ResidentWorker(final String name, final Builder<?> builder,
+	public ResidentWorker(final LazyEnvironment environment,
 		final Function<Environment, Service> launcher)
 	{
-		this.name = name;
+		this.environment = environment;
 		this.launcher = launcher;
-		// Note: Subscribe once, here, and dispatch to the current listeners,
-		// because builders accumulate subscribers with every call.
-		this.builder = builder //
-			.subscribeProgress((title, current, maximum) -> listeners.forEach(
-				l -> l.buildProgress(name, title, current, maximum))) //
-			.subscribeOutput(text -> listeners.forEach(l -> l.buildOutput(name,
-				text))) //
-			.subscribeError(text -> listeners.forEach(l -> l.buildError(name,
-				text)));
 	}
 
-	public String name() {
-		return name;
+	public LazyEnvironment environment() {
+		return environment;
 	}
 
 	/**
@@ -106,11 +91,6 @@ public class ResidentWorker implements AutoCloseable {
 	 */
 	public Lock exclusive() {
 		return exclusive;
-	}
-
-	public ResidentWorker addBuildListener(final BuildListener listener) {
-		listeners.add(listener);
-		return this;
 	}
 
 	/**
@@ -123,21 +103,6 @@ public class ResidentWorker implements AutoCloseable {
 		debug = listener;
 	}
 
-	/** Gets the environment, building it if this is its first use. */
-	public synchronized Environment environment() throws BuildException {
-		if (env != null) return env;
-		listeners.forEach(l -> l.buildStarted(name));
-		try {
-			env = builder.build();
-		}
-		catch (final BuildException | RuntimeException exc) {
-			listeners.forEach(l -> l.buildFinished(name, exc));
-			throw exc;
-		}
-		listeners.forEach(l -> l.buildFinished(name, null));
-		return env;
-	}
-
 	/**
 	 * Gets the worker's service, building the environment and starting the
 	 * worker process first if needed.
@@ -146,7 +111,7 @@ public class ResidentWorker implements AutoCloseable {
 	 */
 	public synchronized Service service() throws BuildException {
 		if (service != null && service.isAlive()) return service;
-		final Service s = launcher.apply(environment());
+		final Service s = launcher.apply(environment.get());
 		s.debug(msg -> {
 			final Consumer<String> listener = debug;
 			if (listener != null) listener.accept(msg);
@@ -161,7 +126,7 @@ public class ResidentWorker implements AutoCloseable {
 		return service;
 	}
 
-	/** Creates a task to run on the resident worker. */
+	/** Creates a task to run on this worker. */
 	public Service.Task task(final String script,
 		final Map<String, Object> inputs) throws BuildException
 	{

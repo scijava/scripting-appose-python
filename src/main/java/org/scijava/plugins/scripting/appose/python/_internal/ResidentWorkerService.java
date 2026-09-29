@@ -33,8 +33,11 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
+import org.apposed.appose.Builder;
+import org.apposed.appose.Environment;
 import org.scijava.app.StatusService;
 import org.scijava.log.LogService;
 import org.scijava.plugin.Parameter;
@@ -45,9 +48,15 @@ import org.scijava.service.Service;
 import org.scijava.task.TaskService;
 
 /**
- * Keeps one {@link ResidentWorker} per Appose environment for the lifetime of
- * the application context, showing environment builds as SciJava tasks, and
- * ending every worker when the context is disposed.
+ * Keeps Appose environments and their {@link ResidentWorker}s for the
+ * lifetime of the application context, showing environment builds as SciJava
+ * tasks, and ending every worker when the context is disposed.
+ * <p>
+ * Each environment currently gets exactly one worker. Several workers per
+ * environment would let runs proceed in parallel, but each worker holds its
+ * own copy of whatever a script loads (GPU memory included), and state kept
+ * via {@code task.export(...)} would live in only one of them.
+ * </p>
  */
 @Plugin(type = Service.class)
 public class ResidentWorkerService extends AbstractService implements
@@ -63,35 +72,38 @@ public class ResidentWorkerService extends AbstractService implements
 	@Parameter(required = false)
 	private LogService log;
 
-	/** Workers by environment name, each with the configuration it was made for. */
-	private final Map<String, Entry> workers = new HashMap<>();
+	/** Environments by name, each with its configuration and worker. */
+	private final Map<String, Entry> entries = new HashMap<>();
 
 	/**
-	 * Gets the resident worker for the named environment, creating it if
-	 * needed.
+	 * Gets the resident worker for the named environment, creating the
+	 * environment and worker if needed.
 	 * <p>
-	 * If the environment's configuration has changed since its worker was
-	 * created, as indicated by {@code config}, the old worker is released and
+	 * If the environment's configuration has changed since it was created, as
+	 * indicated by {@code config}, its old worker is released and both are
 	 * replaced, so that the next run uses the updated environment.
 	 * </p>
 	 *
 	 * @param name Name of the environment.
 	 * @param config The environment's configuration, e.g. its file contents.
-	 * @param factory Creates a worker for the environment.
+	 * @param builder Creates a builder for the environment.
+	 * @param launcher Creates a worker's service from the built environment.
 	 */
 	public ResidentWorker worker(final String name, final String config,
-		final Supplier<ResidentWorker> factory)
+		final Supplier<Builder<?>> builder,
+		final Function<Environment, org.apposed.appose.Service> launcher)
 	{
 		final ResidentWorker stale;
 		final ResidentWorker worker;
-		synchronized (workers) {
-			final Entry entry = workers.get(name);
+		synchronized (entries) {
+			final Entry entry = entries.get(name);
 			if (entry != null && entry.config.equals(config)) return entry.worker;
 			stale = entry == null ? null : entry.worker;
-			worker = factory.get();
-			worker.addBuildListener(SciJavaTasks.buildListener(taskService,
+			final LazyEnvironment env = new LazyEnvironment(name, builder.get());
+			env.addBuildListener(SciJavaTasks.buildListener(taskService,
 				statusService, log));
-			workers.put(name, new Entry(config, worker));
+			worker = new ResidentWorker(env, launcher);
+			entries.put(name, new Entry(config, worker));
 		}
 		if (stale != null) stale.release();
 		return worker;
@@ -100,8 +112,8 @@ public class ResidentWorkerService extends AbstractService implements
 	/** Gets the current resident workers. */
 	public List<ResidentWorker> workers() {
 		final List<ResidentWorker> list = new ArrayList<>();
-		synchronized (workers) {
-			for (final Entry entry : workers.values()) list.add(entry.worker);
+		synchronized (entries) {
+			for (final Entry entry : entries.values()) list.add(entry.worker);
 		}
 		return list;
 	}
@@ -119,8 +131,8 @@ public class ResidentWorkerService extends AbstractService implements
 	@Override
 	public void dispose() {
 		releaseAll();
-		synchronized (workers) {
-			workers.clear();
+		synchronized (entries) {
+			entries.clear();
 		}
 	}
 

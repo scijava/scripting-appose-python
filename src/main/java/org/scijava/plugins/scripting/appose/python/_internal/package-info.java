@@ -36,7 +36,8 @@
  * accordingly:
  * </p>
  * <ul>
- * <li>{@link org.scijava.plugins.scripting.appose.python._internal.BuildListener}
+ * <li>{@link org.scijava.plugins.scripting.appose.python._internal.BuildListener},
+ * {@link org.scijava.plugins.scripting.appose.python._internal.LazyEnvironment}
  * and {@link org.scijava.plugins.scripting.appose.python._internal.ResidentWorker}
  * belong in Appose core, and must not import anything from
  * {@code org.scijava}.</li>
