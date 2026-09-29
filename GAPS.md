@@ -154,6 +154,44 @@ worker, every such output leaked one block.
   nothing checks directly that blocks are freed. A shared memory pool in
   Appose core (planned) would make ownership explicit.
 
+## Inline environments
+
+**Now:** `InlineMetadata` translates a PEP 723 block into a `pyproject.toml`
+for Appose's pixi builder: `requires-python` and `dependencies` move into
+`[project]`, `[tool.*]` tables are kept, and `[tool.pixi.workspace]` gains
+`channels = ["conda-forge"]` and the running platform if it lacks them, since
+a pixi workspace requires both. This mirrors pixi's own `inline_pyproject`,
+including its list of allowed `[tool.pixi.*]` keys, so a script accepted here
+also runs with `pixi run --script`.
+
+**Gaps:**
+
+- **Relative paths.** pixi resolves relative paths in script metadata (e.g.
+  an editable `path` dependency) from the script's directory. Here they
+  resolve from the environment directory, so they break. Rewriting them to
+  absolute paths is possible, but meaningless for scripts inside a JAR.
+- **Lock files.** A `<script>.pixi.lock` sidecar, as written by
+  `pixi lock --script`, is ignored; each environment is locked afresh.
+- **Unsaved scripts.** An inline environment is named after its script's
+  path. Unsaved scripts (e.g. new from a template) have none, so they are
+  named by a hash of the metadata instead. Editing the metadata of an unsaved
+  script therefore creates a new environment and worker, and the old worker
+  keeps running until the application exits.
+- **The generated file is not readable by Appose's scheme detection.** Its
+  TOML uses dotted keys (`project.name = ...`), while Appose's line-based
+  detection looks for `[project]`. The engine passes the scheme explicitly.
+  In Appose core, inline metadata should be a scheme of its own, so any
+  Appose user can build from a script.
+
+## Environment files inside JARs
+
+**Now:** `#@script(env="...")` is resolved against the script's file path.
+Scripts inside a JAR have no such file, so they cannot use environment files.
+Resolving the reference as a URL relative to the script's own URL (e.g.
+`jar:file:...!/scripts/env.toml`) would fix that, while keeping a script and
+its environment from the same origin, but it has not been done. Inline
+environments avoid the problem.
+
 ## Not yet tried
 
 - **Real Fiji GUI.** All tests are headless. The build and run tasks have not
@@ -168,7 +206,7 @@ worker, every such output leaked one block.
 
 | Class | Destination |
 | --- | --- |
-| `BuildListener`, `LazyEnvironment`, `ResidentWorker` | Appose core |
+| `BuildListener`, `InlineMetadata`, `LazyEnvironment`, `ResidentWorker` | Appose core |
 | `ResidentWorkerService`, `SciJavaTasks` | `scijava/scijava-appose` |
 | `NDArrayToImgConverter`, `RAIToNDArrayConverter`, ImageJ2 dependencies | `fiji/fiji-appose` |
 

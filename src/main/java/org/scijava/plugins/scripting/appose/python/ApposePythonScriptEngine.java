@@ -70,6 +70,7 @@ import org.scijava.log.LogService;
 import org.scijava.log.Logger;
 import org.scijava.module.ModuleItem;
 import org.scijava.plugin.Parameter;
+import org.scijava.plugins.scripting.appose.python._internal.InlineMetadata;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorker;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerService;
 import org.scijava.plugins.scripting.appose.python._internal.SciJavaTasks;
@@ -156,7 +157,7 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 			((ScriptModule) moduleObj).getInfo() : null;
 
 		// Retrieve the resident worker for the script's environment.
-		final ResidentWorker worker = worker(info);
+		final ResidentWorker worker = worker(info, script);
 
 		// Collect declared inputs, converting array-like values to NDArray.
 		final Map<String, Object> taskInputs = new HashMap<>();
@@ -439,18 +440,33 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 	}
 
 	/**
-	 * Gets the resident worker for the Appose environment described by the
-	 * {@code env} and {@code scheme} attributes of the script's
-	 * {@code #@script} directive. The environment itself is built lazily, by
-	 * the worker's first task.
+	 * Gets the resident worker for the script's Appose environment, which the
+	 * script declares either inline, via a PEP 723 {@code # /// script}
+	 * metadata block, or in a file named by the {@code env} (and optionally
+	 * {@code scheme}) attributes of its {@code #@script} directive. The
+	 * environment itself is built lazily, by the worker's first task.
 	 */
-	private ResidentWorker worker(final ScriptInfo info) throws ScriptException {
-		final String envRef = info == null ? null : info.get("env");
-		if (envRef == null) {
-			throw new ScriptException(
-				"No Appose environment configured. " +
-				"Add #@script(env=\"myenv.toml\") to declare one.");
+	private ResidentWorker worker(final ScriptInfo info, final String script)
+		throws ScriptException
+	{
+		if (info == null) throw noEnvironment();
+		final String envRef = info.get("env");
+		final String metadata;
+		try {
+			metadata = InlineMetadata.extract(script);
 		}
+		catch (final IllegalArgumentException e) {
+			throw scriptException(e.getMessage(), e);
+		}
+		if (metadata != null) {
+			if (envRef != null) {
+				throw new ScriptException("The script declares its environment " +
+					"twice: inline, and via #@script(env=\"" + envRef + "\"). " +
+					"Remove one of them.");
+			}
+			return inlineWorker(metadata, info.getPath());
+		}
+		if (envRef == null) throw noEnvironment();
 
 		final File envFile = resolveEnvFile(envRef, info.getPath());
 		if (!envFile.isFile()) {
@@ -466,9 +482,36 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 			throw scriptException("Cannot read Appose environment file: " +
 				envFile.getAbsolutePath(), e);
 		}
-		final String envName = envName(envFile);
-		final String scheme = info.get("scheme");
+		return worker(envName(envFile), content, info.get("scheme"));
+	}
 
+	/** Gets the resident worker for an environment declared inline. */
+	private ResidentWorker inlineWorker(final String metadata,
+		final String scriptPath) throws ScriptException
+	{
+		// Note: Name the environment after the script, as for environment
+		// files, so that editing the metadata updates the environment and
+		// replaces its worker, rather than leaving the old one running.
+		// Unsaved scripts, e.g. new from a template, have no path to go by.
+		final String envName = scriptPath == null ? "script-" + String.format(
+			"%08x", metadata.hashCode()) : envName(new File(scriptPath));
+		final String content;
+		try {
+			content = InlineMetadata.toPyProject(metadata, envName);
+		}
+		catch (final IllegalArgumentException e) {
+			throw scriptException(e.getMessage(), e);
+		}
+		return worker(envName, content, InlineMetadata.SCHEME);
+	}
+
+	/**
+	 * Gets the resident worker for the named environment, built from the given
+	 * configuration.
+	 */
+	private ResidentWorker worker(final String envName, final String content,
+		final String scheme)
+	{
 		return workerService.worker(envName, scheme + "\n" + content, () -> {
 			final Builder<?> builder = Appose.content(content);
 			return scheme == null ? builder : builder.scheme(scheme);
@@ -503,6 +546,12 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 		final String path = envFile.getAbsoluteFile().toPath().normalize().toString();
 		return baseName.replaceAll("[^a-zA-Z0-9_-]", "_") + "-" +
 			String.format("%08x", path.hashCode());
+	}
+
+	private static ScriptException noEnvironment() {
+		return new ScriptException("No Appose environment configured. " +
+			"Declare one inline with a '# /// script' metadata block (PEP 723), " +
+			"or in a file via #@script(env=\"myenv.toml\").");
 	}
 
 	private static ScriptException scriptException(final String message,

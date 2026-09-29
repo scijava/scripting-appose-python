@@ -1,5 +1,8 @@
 #!appose-python
-#@script (language="appose-python", env="cellcast.toml", scheme="pixi.toml")
+# /// script
+# requires-python = ">=3.14.3,<3.15"
+# dependencies = ["cellcast>=0.1.2,<0.2", "appose>=0.12.0,<0.13"]
+# ///
 
 #@ Img image
 #@output Img labels

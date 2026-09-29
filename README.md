@@ -15,7 +15,10 @@ from the Script Editor or menus of ImageJ2/Fiji like any other script.
 
 ```python
 #!appose-python
-#@script(env="myenv.toml")
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["appose", "scipy"]
+# ///
 
 #@ Img image
 #@ double sigma
@@ -29,11 +32,8 @@ blurred = gaussian_filter(image, sigma)
 
 * The `#!appose-python` line selects this script language, rather than
   another language handling `.py` files, such as Jython.
-* The `env` attribute points to an environment configuration file, resolved
-  relative to the script's location. Any format Appose supports works:
-  `pixi.toml`, `environment.yml`, `requirements.txt` or `pyproject.toml`.
-  An optional `scheme` attribute (e.g. `scheme="pixi.toml"`) sets the format
-  explicitly, which is useful when the file name does not reveal it.
+* The `# /// script` block declares the script's Python environment; see
+  below.
 * The environment must include the `appose` Python package, plus `numpy` if
   the script uses images.
 
@@ -41,12 +41,52 @@ See the `StarDist_cellcast.py` template for a complete example.
 
 ## Environments
 
+A script declares its environment in one of two ways.
+
+**Inline**, with a [PEP 723](https://packaging.python.org/en/latest/specifications/inline-script-metadata/)
+metadata block, as above. `requires-python` selects the Python version, and
+`dependencies` lists packages from PyPI. The `[tool.pixi.*]` extensions of
+[`pixi run --script`](https://pixi.sh/latest/python/scripts/) are supported
+too, so conda packages are available, e.g. to get CUDA libraries from
+conda-forge:
+
+```python
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["appose"]
+#
+# [tool.pixi.dependencies]
+# pytorch-gpu = "*"
+#
+# [tool.pixi.system-requirements]
+# cuda = "12"
+# ///
+```
+
+If `[tool.pixi.workspace]` does not say otherwise, packages come from
+conda-forge, for the platform the script runs on. Inline environments are the
+way to go for scripts that must stand alone, such as templates.
+
+**In a file**, named by the `env` attribute of the `#@script` directive:
+
+```python
+#@script(env="myenv.toml")
+```
+
+The file is resolved relative to the script's location. Any format Appose
+supports works: `pixi.toml`, `environment.yml`, `requirements.txt` or
+`pyproject.toml`. An optional `scheme` attribute (e.g. `scheme="pixi.toml"`)
+sets the format explicitly, which is useful when the file name does not reveal
+it. Scripts that share a file share an environment.
+
+A script cannot do both.
+
 The environment is built the first time a script needs it, which may take a
 while. Afterward, it is reused, both within the running application and across
 restarts. Environments are stored in the Appose environments directory
-(`~/.local/share/appose` by default), named after the configuration file.
-Scripts that share a configuration file share an environment. Editing the file
-causes the environment to be updated on the next run.
+(`~/.local/share/appose` by default), named after the file declaring them: the
+environment file, or the script itself for inline environments. Editing the
+declaration causes the environment to be updated on the next run.
 
 Builds appear in the application's task list, with their progress, so a
 long first build does not look like a hang.

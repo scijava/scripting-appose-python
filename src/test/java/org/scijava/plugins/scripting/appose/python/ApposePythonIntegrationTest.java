@@ -206,6 +206,27 @@ public class ApposePythonIntegrationTest {
 	}
 
 	@Test
+	public void testInlineEnvironment() throws Exception {
+		final ScriptModule module = run("inline", "#!appose-python\n" + //
+			"# /// script\n" + //
+			"# requires-python = \">=3.12,<3.13\"\n" + //
+			"# dependencies = [\"appose==0.12.0\"]\n" + //
+			"#\n" + //
+			"# [tool.pixi.dependencies]\n" + //
+			"# numpy = \"*\"\n" + //
+			"# ///\n" + //
+			"#@output String python\n" + //
+			"#@output String numpy_version\n" + //
+			"import sys, numpy\n" + //
+			"python = '%d.%d' % sys.version_info[:2]\n" + //
+			"numpy_version = numpy.__version__\n", new HashMap<>());
+		assertEquals("", err.toString());
+		assertEquals("3.12", module.getOutput("python"));
+		// Note: numpy comes only from the conda dependencies in tool.pixi.
+		assertNotNull(module.getOutput("numpy_version"));
+	}
+
+	@Test
 	public void testReturnValue() throws Exception {
 		final Map<String, Object> inputs = new HashMap<>();
 		inputs.put("a", 21);

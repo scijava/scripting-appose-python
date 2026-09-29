@@ -212,6 +212,31 @@ public class ApposePythonScriptEngineTest {
 			new File(tmp.getRoot(), "missing.toml").getPath()));
 	}
 
+	@Test
+	public void testEvalWithEnvDeclaredTwice() throws Exception {
+		final String script = "#@script(env=\"env.toml\")\n" + //
+			"# /// script\n" + //
+			"# dependencies = [\"appose\"]\n" + //
+			"# ///\n" + //
+			"print('hi')\n";
+		final ScriptException e =
+			assertThrows(ScriptException.class, () -> eval("test.py", script));
+		assertTrue(e.getMessage(), e.getMessage().contains(
+			"declares its environment twice"));
+	}
+
+	@Test
+	public void testEvalWithInvalidInlineMetadata() throws Exception {
+		final String script = "# /// script\n" + //
+			"# dependencies = \"appose\"\n" + //
+			"# ///\n" + //
+			"print('hi')\n";
+		final ScriptException e =
+			assertThrows(ScriptException.class, () -> eval("test.py", script));
+		assertTrue(e.getMessage(), e.getMessage().contains(
+			"Invalid script metadata: dependencies must be an array"));
+	}
+
 	/** Evaluates a script the way {@link ScriptModule#run()} does. */
 	private void eval(final String path, final String script) throws Exception {
 		final ScriptInfo info =
