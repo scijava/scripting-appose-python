@@ -32,12 +32,9 @@ package org.scijava.plugins.scripting.appose.python;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.math.BigDecimal;
-import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -54,11 +51,8 @@ import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-import net.imglib2.RandomAccessibleInterval;
-
 import org.apposed.appose.Appose;
 import org.apposed.appose.Environment;
-import org.apposed.appose.NDArray;
 import org.apposed.appose.Service;
 import org.apposed.appose.util.Environments;
 import org.scijava.Context;
@@ -68,6 +62,9 @@ import org.scijava.code.api.CodeCompletionService;
 import org.scijava.code.api.Completion;
 import org.scijava.code.api.CompletionRequest;
 import org.scijava.code.api.CompletionResult;
+import org.scijava.code.api.EnvironmentContext;
+import org.scijava.code.api.ScriptDialect;
+import org.scijava.code.api.ScriptDocument;
 import org.scijava.code.api.SignatureHelp;
 import org.scijava.code.api.SignatureHelp.Fit;
 import org.scijava.code.api.Signatures;
@@ -75,6 +72,7 @@ import org.scijava.plugin.Plugin;
 import org.scijava.plugins.scripting.appose.python._internal.InlineMetadata;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorker;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerService;
+import org.scijava.plugins.scripting.appose.python.completion.ApposePythonDialect;
 import org.scijava.plugins.scripting.appose.python.completion.DependencyOverlays;
 import org.scijava.plugins.scripting.appose.python.completion.JediClient;
 import org.scijava.plugins.scripting.appose.python.completion.PythonSyntax;
@@ -150,6 +148,9 @@ public class ApposePythonCodeCompleter extends AbstractCodeCompleterPlugin {
 	 */
 	private static final long OVERLAY_SETTLE = 1500;
 
+	/** How scripts see their parameters (as Python values) and {@code task}. */
+	private static final ApposePythonDialect DIALECT = new ApposePythonDialect();
+
 	@Override
 	public boolean supports(final ScriptLanguage language) {
 		return language instanceof ApposePythonScriptLanguage;
@@ -165,10 +166,11 @@ public class ApposePythonCodeCompleter extends AbstractCodeCompleterPlugin {
 			return CompletionResult.EMPTY;
 		}
 
-		final Map<String, String> params = parameterTypes(text);
-		final List<Completion> local = localCompletions(ctx, params);
-		final CompletableFuture<List<Completion>> answer = jediCompletions(request,
-			ctx, params);
+		final JediClient client = jediClient();
+		final ScriptDocument doc = document(request, client != null, false);
+		final List<Completion> local = localCompletions(ctx, doc.parameters());
+		final CompletableFuture<List<Completion>> answer = client == null ? null
+			: jediCompletions(client, request, ctx, doc);
 		if (answer == null) return merge(ctx, null, local);
 
 		// Use Jedi's answer if it is (almost) ready; otherwise answer without it
@@ -195,15 +197,14 @@ public class ApposePythonCodeCompleter extends AbstractCodeCompleterPlugin {
 		// analyze the script against its environment, in the background.
 		final JediClient client = jediClient();
 		if (client == null) return;
-		final String text = request.text();
-		final String python = scriptPython(text, request.path());
-		final String overlay = overlay(text, request.path(), python, true);
-		final String source = preamble(parameterTypes(text)) + text;
-		final int line = count(source, '\n') + 1;
-		final int column = source.length() - source.lastIndexOf('\n') - 1;
-		client.answer("prepare\n" + request.path() + "\n" + text,
-			new JediClient.Query(source, line, column, request.path(), python, 0,
-				overlay));
+		final ScriptDocument doc = document(request, true, true);
+		client.answer("prepare\n" + request.path() + "\n" + request.text(), query(
+			doc, request.text().length(), request.path(), 0));
+	}
+
+	@Override
+	public ScriptDialect dialect() {
+		return DIALECT;
 	}
 
 	@Override
@@ -220,19 +221,12 @@ public class ApposePythonCodeCompleter extends AbstractCodeCompleterPlugin {
 		final JediClient client = jediClient();
 		if (client == null) return SignatureHelp.NONE;
 
-		final String python = scriptPython(text, request.path());
-		final String overlay = overlay(text, request.path(), python, false);
-		final String preamble = preamble(parameterTypes(text));
-		final String before = preamble + text.substring(0, caret);
-		final int line = count(before, '\n') + 1;
-		final int column = before.length() - before.lastIndexOf('\n') - 1;
-		final JediClient.Query query = new JediClient.Query(preamble + text, line,
-			column, request.path(), python, 0, overlay);
+		final ScriptDocument doc = document(request, true, false);
+		final JediClient.Query query = query(doc, caret, request.path(), 0);
 		final int active = args.size() - 1;
 		// NB: Where Jedi cannot tell the argument, count the commas.
 		final CompletableFuture<SignatureHelp> help = client.signatures(
-			"signatures\n" + python + "\n" + overlay + "\n" + request.path() +
-				"\n" + before, query).handle((h, error) -> h == null ? null
+			"signatures\n" + key(doc, caret, request.path()), query).handle((h, error) -> h == null ? null
 					: new SignatureHelp(h.signatures(), h.activeParameter() >= 0 ? h
 						.activeParameter() : active, open));
 		try {
@@ -348,7 +342,7 @@ public class ApposePythonCodeCompleter extends AbstractCodeCompleterPlugin {
 					: p.getValue() + " (script parameter)").build());
 		}
 		if (matches("task", prefix)) out.add(Completion.builder("task").kind(
-			Completion.Kind.VARIABLE).summary("appose.python_worker.Task").build());
+			Completion.Kind.VARIABLE).summary(ApposePythonDialect.TASK_TYPE).build());
 		for (final String name : PythonSyntax.BUILTINS) {
 			if (matches(name, prefix)) out.add(Completion.builder(name).kind(
 				Completion.Kind.OTHER).summary("builtin").build());
@@ -365,32 +359,70 @@ public class ApposePythonCodeCompleter extends AbstractCodeCompleterPlugin {
 	 *
 	 * @return Jedi's answer, or pending answer; or null if Jedi is unavailable.
 	 */
-	private CompletableFuture<List<Completion>> jediCompletions(
-		final CompletionRequest request, final PythonSyntax.Context ctx,
-		final Map<String, String> params)
+	private static CompletableFuture<List<Completion>> jediCompletions(
+		final JediClient client, final CompletionRequest request,
+		final PythonSyntax.Context ctx, final ScriptDocument doc)
 	{
-		final JediClient client = jediClient();
-		if (client == null) return null;
-		final String text = request.text();
-		final String python = scriptPython(text, request.path());
-		final String overlay = overlay(text, request.path(), python, false);
-
 		// Ask about the first character typed, if any: later keystrokes of the
 		// same word then reuse the answer (filtered), while it stays short.
 		final int caret = ctx.replaceStart + Math.min(1, ctx.prefix.length());
-		final String preamble = preamble(params);
-		final String before = preamble + text.substring(0, caret);
-		final int line = count(before, '\n') + 1;
-		final int column = before.length() - before.lastIndexOf('\n') - 1;
 		// NB: Signatures are expensive, so ask for them only once a word is
 		// begun, which narrows the completions down. Before that, functions are
 		// offered by name.
-		final JediClient.Query query = new JediClient.Query(preamble + text, line,
-			column, request.path(), python, ctx.prefix.isEmpty() ? 0 : SIGNATURES,
-			overlay);
-		final String key = python + "\n" + overlay + "\n" + request.path() +
-			"\n" + before;
-		return client.answer(key, query);
+		final JediClient.Query query = query(doc, caret, request.path(), ctx.prefix
+			.isEmpty() ? 0 : SIGNATURES);
+		return client.answer(key(doc, caret, request.path()), query);
+	}
+
+	/**
+	 * Gets the script as plain Python, for Jedi: its parameters declared, and
+	 * (if asked) where it runs: its environment's Python, and its overlay.
+	 *
+	 * @param environment Whether to find where the script runs.
+	 * @param settled Whether the dependencies are known not to be changing.
+	 */
+	private ScriptDocument document(final CompletionRequest request,
+		final boolean environment, final boolean settled)
+	{
+		final String text = request.text();
+		EnvironmentContext env = null;
+		if (environment) {
+			final String python = scriptPython(text, request.path());
+			final String overlay = overlay(text, request.path(), python, settled);
+			env = new EnvironmentContext(python, overlay == null ? null
+				: Collections.singletonList(overlay), null);
+		}
+		final CodeCompletionService service = service(
+			CodeCompletionService.class);
+		final Map<String, Class<?>> params = service == null ? Collections
+			.emptyMap() : service.scriptParameters(text);
+		return ScriptDocument.of(text, params, DIALECT, env);
+	}
+
+	/** Asks Jedi about the given offset of the script. */
+	private static JediClient.Query query(final ScriptDocument doc,
+		final int offset, final String path, final int flags)
+	{
+		final String before = doc.text().substring(0, doc.map().toTransformed(
+			offset));
+		final int line = count(before, '\n') + 1;
+		final int column = before.length() - before.lastIndexOf('\n') - 1;
+		final EnvironmentContext env = doc.environment();
+		final String overlay = env.searchPaths().isEmpty() ? null : env
+			.searchPaths().get(0);
+		return new JediClient.Query(doc.text(), line, column, path, env
+			.interpreter(), flags, overlay);
+	}
+
+	/** Identifies a question about the given offset, for reusing answers. */
+	private static String key(final ScriptDocument doc, final int offset,
+		final String path)
+	{
+		final EnvironmentContext env = doc.environment();
+		final String overlay = env.searchPaths().isEmpty() ? null : env
+			.searchPaths().get(0);
+		return env.interpreter() + "\n" + overlay + "\n" + path + "\n" + doc
+			.text().substring(0, doc.map().toTransformed(offset));
 	}
 
 	/**
@@ -457,63 +489,6 @@ public class ApposePythonCodeCompleter extends AbstractCodeCompleterPlugin {
 		catch (final Exception exc) {
 			throw new IllegalStateException("Overlay installation failed", exc);
 		}
-	}
-
-	/**
-	 * A line declaring the types of the script's parameters, for Jedi, e.g.
-	 * {@code import numpy; image: numpy.ndarray; sigma: float}.
-	 */
-	static String preamble(final Map<String, String> params) {
-		final StringBuilder sb = new StringBuilder(
-			"import appose.python_worker; task: appose.python_worker.Task");
-		if (params.containsValue("numpy.ndarray")) sb.append("; import numpy");
-		for (final Map.Entry<String, String> p : params.entrySet()) {
-			if (p.getValue() == null) continue;
-			sb.append("; ").append(p.getKey()).append(": ").append(p.getValue());
-		}
-		return sb.append('\n').toString();
-	}
-
-	/**
-	 * Gets the script's parameters, with the Python types they have when the
-	 * script runs (see {@link ApposePythonScriptEngine#marshal}), or null types
-	 * if unknown.
-	 */
-	private Map<String, String> parameterTypes(final String text) {
-		final Map<String, String> params = new LinkedHashMap<>();
-		final Context context = getContext();
-		final CodeCompletionService service = context == null ? null : context
-			.getService(CodeCompletionService.class);
-		if (service == null) return params;
-		service.scriptParameters(text).forEach((name, type) -> params.put(name,
-			pythonType(type)));
-		return params;
-	}
-
-	/** The Python type a Java value of the given type becomes in a script. */
-	static String pythonType(final Class<?> type) {
-		if (type == null) return null;
-		if (RandomAccessibleInterval.class.isAssignableFrom(type) || NDArray.class
-			.isAssignableFrom(type)) return "numpy.ndarray";
-		if (type == boolean.class || type == Boolean.class) return "bool";
-		if (type == int.class || type == long.class || type == short.class ||
-			type == byte.class || type == Integer.class || type == Long.class ||
-			type == Short.class || type == Byte.class || type == BigInteger.class)
-		{
-			return "int";
-		}
-		if (type == float.class || type == double.class || type == Float.class ||
-			type == Double.class || type == BigDecimal.class) return "float";
-		if (CharSequence.class.isAssignableFrom(type) || type == char.class ||
-			type == Character.class || type.isEnum() || type == File.class)
-		{
-			return "str";
-		}
-		if (type.isArray() || Collection.class.isAssignableFrom(type)) {
-			return "list";
-		}
-		if (Map.class.isAssignableFrom(type)) return "dict";
-		return null;
 	}
 
 	/**

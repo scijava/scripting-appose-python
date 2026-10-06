@@ -55,6 +55,7 @@ import org.scijava.code.api.CodeCompletionService;
 import org.scijava.code.api.Completion;
 import org.scijava.code.api.CompletionRequest;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerService;
+import org.scijava.plugins.scripting.appose.python.completion.ApposePythonDialect;
 import org.scijava.plugins.scripting.appose.python.completion.JediClient;
 import org.scijava.script.ScriptLanguage;
 import org.scijava.script.ScriptService;
@@ -65,6 +66,8 @@ import org.scijava.script.ScriptService;
  * @author Gabriel Selzer
  */
 public class ApposePythonCodeCompleterTest {
+
+	private static final ApposePythonDialect DIALECT = new ApposePythonDialect();
 
 	private Context context;
 	private ScriptLanguage language;
@@ -362,8 +365,8 @@ public class ApposePythonCodeCompleterTest {
 		complete(code);
 		// The script's parameters are typed in a preamble, so Jedi knows them.
 		assertTrue(query[0].source.startsWith(
-			"import appose.python_worker; task: appose.python_worker.Task; " +
-				"import numpy; image: numpy.ndarray; sigma: float\n"));
+			"import appose.python_worker; import numpy; image: numpy.ndarray; " +
+				"sigma: float; task: appose.python_worker.Task\n"));
 		// The caret is after the word's first character, shifted by the preamble.
 		assertEquals(4, query[0].line);
 		assertEquals("image.s".length(), query[0].column);
@@ -484,14 +487,14 @@ public class ApposePythonCodeCompleterTest {
 
 	@Test
 	public void testPythonTypes() {
-		assertEquals("numpy.ndarray", ApposePythonCodeCompleter.pythonType(
+		assertEquals("numpy.ndarray", DIALECT.runtimeType(
 			Img.class));
-		assertEquals("float", ApposePythonCodeCompleter.pythonType(double.class));
-		assertEquals("int", ApposePythonCodeCompleter.pythonType(Long.class));
-		assertEquals("str", ApposePythonCodeCompleter.pythonType(String.class));
-		assertEquals("bool", ApposePythonCodeCompleter.pythonType(boolean.class));
-		assertEquals("list", ApposePythonCodeCompleter.pythonType(int[].class));
-		assertNull(ApposePythonCodeCompleter.pythonType(Context.class));
+		assertEquals("float", DIALECT.runtimeType(double.class));
+		assertEquals("int", DIALECT.runtimeType(Long.class));
+		assertEquals("str", DIALECT.runtimeType(String.class));
+		assertEquals("bool", DIALECT.runtimeType(boolean.class));
+		assertEquals("list", DIALECT.runtimeType(int[].class));
+		assertNull(DIALECT.runtimeType(Context.class));
 	}
 
 	@Test
