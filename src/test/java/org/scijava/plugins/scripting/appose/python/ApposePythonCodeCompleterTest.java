@@ -269,6 +269,26 @@ public class ApposePythonCodeCompleterTest {
 	}
 
 	@Test
+	public void testHoverAndDiagnostics() throws Exception {
+		final FakeLsp fake = fake(q -> Collections.emptyList());
+		final String code = "#@ double sigma\nimport json\njson.dumps(sigma)";
+		org.scijava.code.api.Hover hover = completer.hover(new CompletionRequest(
+			code, code.indexOf("dumps") + 1, language, null, null, null));
+		if (hover.update() != null) hover = hover.update().get(5,
+			TimeUnit.SECONDS);
+		assertEquals("<pre>dumps</pre>", hover.text());
+		assertEquals(code.indexOf("dumps") + 1, last(fake).offset);
+		// Not in comments or strings.
+		assertTrue(completer.hover(new CompletionRequest("# json.dumps", 4,
+			language, null, null, null)).isEmpty());
+
+		final List<org.scijava.code.api.Diagnostic> problems = completer.diagnose(
+			new CompletionRequest(code, language, null)).get(5, TimeUnit.SECONDS);
+		assertEquals(1, problems.size());
+		assertTrue(last(fake).doc.text().endsWith(code));
+	}
+
+	@Test
 	public void testServerQuery() {
 		final FakeLsp fake = fake(q -> Collections.emptyList());
 		final String code = "#@ net.imglib2.img.Img image\n#@ double sigma\n" +
@@ -291,13 +311,15 @@ public class ApposePythonCodeCompleterTest {
 		final JediLanguageServerSpec spec = new JediLanguageServerSpec(() -> null,
 			new java.io.File("workspace"), new java.io.File("server.log"));
 		assertEquals("python", spec.languageId());
+		final String diagnostics = "diagnostics={enable=true, didOpen=true, " +
+			"didChange=true, didSave=false}";
 		assertEquals("{workspace={environmentPath=/env/bin/python, " +
-			"extraPaths=[/overlay]}, diagnostics={enable=false}}", String.valueOf(
-				spec.initializationOptions(new EnvironmentContext("/env/bin/python",
+			"extraPaths=[/overlay]}, " + diagnostics + "}", String.valueOf(spec
+				.initializationOptions(new EnvironmentContext("/env/bin/python",
 					Collections.singletonList("/overlay"), null))));
 		// Without a script environment: the server's own.
-		assertEquals("{workspace={extraPaths=[]}, diagnostics={enable=false}}",
-			String.valueOf(spec.initializationOptions(EnvironmentContext.EMPTY)));
+		assertEquals("{workspace={extraPaths=[]}, " + diagnostics + "}", String
+			.valueOf(spec.initializationOptions(EnvironmentContext.EMPTY)));
 		assertTrue(spec.rootUri(EnvironmentContext.EMPTY).startsWith("file:"));
 		new java.io.File("workspace").delete();
 	}
@@ -550,6 +572,25 @@ public class ApposePythonCodeCompleterTest {
 			asked.add(new Asked(doc, uri, offset, 0));
 			return CompletableFuture.completedFuture(new SignatureHelp(signatures,
 				active, callStart));
+		}
+
+		@Override
+		public CompletableFuture<org.scijava.code.api.Hover> hover(
+			final ScriptDocument doc, final String uri, final int offset)
+		{
+			asked.add(new Asked(doc, uri, offset, 0));
+			return CompletableFuture.completedFuture(new org.scijava.code.api.Hover(
+				"<pre>dumps</pre>", offset, offset));
+		}
+
+		@Override
+		public CompletableFuture<List<org.scijava.code.api.Diagnostic>> diagnose(
+			final ScriptDocument doc, final String uri, final long timeout)
+		{
+			asked.add(new Asked(doc, uri, 0, 0));
+			return CompletableFuture.completedFuture(Collections.singletonList(
+				new org.scijava.code.api.Diagnostic(0, 1,
+					org.scijava.code.api.Diagnostic.Severity.ERROR, "Oops", "fake")));
 		}
 
 		@Override

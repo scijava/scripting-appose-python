@@ -60,6 +60,8 @@ import org.scijava.code.api.CodeCompletionService;
 import org.scijava.code.api.Completion;
 import org.scijava.code.api.CompletionRequest;
 import org.scijava.code.api.CompletionResult;
+import org.scijava.code.api.Diagnostic;
+import org.scijava.code.api.Hover;
 import org.scijava.code.api.EnvironmentContext;
 import org.scijava.code.api.ScriptDialect;
 import org.scijava.code.api.ScriptDocument;
@@ -115,6 +117,9 @@ public class ApposePythonCodeCompleter extends AbstractCodeCompleterPlugin {
 	 */
 	private static final long BUDGET = Long.getLong(
 		"scijava.appose.completion.budget", 25);
+
+	/** How long to wait for the server to find problems, in milliseconds. */
+	private static final long DIAGNOSE_TIMEOUT = 30_000;
 
 	/** How many completions get signatures, once a word is begun. */
 	private static final int SIGNATURES = 30;
@@ -226,6 +231,43 @@ public class ApposePythonCodeCompleter extends AbstractCodeCompleterPlugin {
 	@Override
 	public ScriptDialect dialect() {
 		return DIALECT;
+	}
+
+	@Override
+	public Hover hover(final CompletionRequest request) {
+		final String text = request.text();
+		final int at = request.offset();
+		if (PythonSyntax.analyze(text, at).kind == Kind.NONE) {
+			return Hover.NONE; // NB: In a comment or string.
+		}
+		final LspClient client = lspClient();
+		if (client == null) return Hover.NONE;
+		final CompletableFuture<Hover> hover = client.hover(document(request,
+			true, false), uri(request), at).handle((h, error) -> h);
+		try {
+			final Hover h = hover.get(BUDGET, TimeUnit.MILLISECONDS);
+			return h == null ? Hover.NONE : h;
+		}
+		catch (final TimeoutException exc) {
+			return Hover.NONE.withUpdate(hover);
+		}
+		catch (final InterruptedException exc) {
+			Thread.currentThread().interrupt();
+		}
+		catch (final ExecutionException | CancellationException exc) {
+			// NB: The server failed.
+		}
+		return Hover.NONE;
+	}
+
+	@Override
+	public CompletableFuture<List<Diagnostic>> diagnose(
+		final CompletionRequest request)
+	{
+		final LspClient client = lspClient();
+		if (client == null) return super.diagnose(request);
+		return client.diagnose(document(request, true, false), uri(request),
+			DIAGNOSE_TIMEOUT);
 	}
 
 	@Override

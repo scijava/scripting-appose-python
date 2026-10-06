@@ -104,7 +104,12 @@ public class JediLanguageServerSpec implements LspServerSpec {
 		workspaceOptions.put("extraPaths", env.searchPaths());
 		final Map<String, Object> options = new LinkedHashMap<>();
 		options.put("workspace", workspaceOptions);
-		options.put("diagnostics", map("enable", false));
+		// NB: Jedi's diagnostics are syntax errors, found as the script changes.
+		final Map<String, Object> diagnostics = map("enable", true);
+		diagnostics.put("didOpen", true);
+		diagnostics.put("didChange", true);
+		diagnostics.put("didSave", false);
+		options.put("diagnostics", diagnostics);
 		return options;
 	}
 
