@@ -48,6 +48,30 @@ import org.scijava.code.lsp.LspServerSpec;
  */
 public class JediLanguageServerSpec implements LspServerSpec {
 
+	/**
+	 * Runs jedi-language-server, exiting once the given process (this JVM) is
+	 * gone. NB: The server does not notice by itself; on Windows, it then even
+	 * loops, failing to write to the closed pipe.
+	 */
+	public static final String LAUNCHER = String.join("\n", //
+		"import os, sys, threading, time", //
+		"parent = int(sys.argv.pop(1))", //
+		"def watch():", //
+		"    if os.name == 'nt':", //
+		"        import ctypes", //
+		"        k = ctypes.windll.kernel32", //
+		"        h = k.OpenProcess(0x00100000, False, parent)  # SYNCHRONIZE", //
+		"        if h: k.WaitForSingleObject(h, 0xFFFFFFFF)", //
+		"    else:", //
+		"        while os.getppid() == parent: time.sleep(2)", //
+		"    os._exit(0)", //
+		"threading.Thread(target=watch, daemon=True).start()", //
+		"from jedi_language_server.cli import cli", //
+		"cli()");
+
+	/** How large the error log may grow before it is started anew, in bytes. */
+	private static final long MAX_LOG = 5 * 1024 * 1024;
+
 	private final Callable<String> python;
 	private final File workspace;
 	private final File log;
@@ -88,8 +112,9 @@ public class JediLanguageServerSpec implements LspServerSpec {
 		if (exe == null) throw new IOException(
 			"No Python for jedi-language-server");
 		log.getParentFile().mkdirs();
-		final ProcessBuilder pb = new ProcessBuilder(exe, "-c",
-			"from jedi_language_server.cli import cli; cli()");
+		if (log.length() > MAX_LOG) log.delete();
+		final ProcessBuilder pb = new ProcessBuilder(exe, "-c", LAUNCHER, String
+			.valueOf(ProcessHandle.current().pid()));
 		pb.redirectError(ProcessBuilder.Redirect.appendTo(log));
 		return LspConnection.of(pb.start());
 	}
