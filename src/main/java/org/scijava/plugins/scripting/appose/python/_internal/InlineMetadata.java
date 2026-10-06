@@ -111,6 +111,34 @@ public final class InlineMetadata {
 	}
 
 	/**
+	 * Gets the {@code dependencies} (PEP 508 requirement strings, e.g.
+	 * {@code "numpy > 2"}) of a {@code script} metadata block.
+	 *
+	 * @param metadata TOML content of the metadata block.
+	 * @return The dependencies, in declaration order; empty if none.
+	 * @throws IllegalArgumentException If the metadata is not valid.
+	 */
+	public static List<String> dependencies(final String metadata) {
+		final JsonNode parsed;
+		try {
+			parsed = new TomlMapper().readTree(metadata);
+		}
+		catch (final IOException e) {
+			throw new IllegalArgumentException(
+				"Invalid TOML in script metadata: " + e.getMessage(), e);
+		}
+		final JsonNode deps = parsed == null ? null : parsed.get("dependencies");
+		if (deps == null) return Collections.emptyList();
+		if (!deps.isArray()) throw invalid("dependencies must be an array");
+		final List<String> out = new ArrayList<>();
+		for (final JsonNode dep : deps) {
+			if (!dep.isTextual()) throw invalid("dependencies must be strings");
+			out.add(dep.asText());
+		}
+		return out;
+	}
+
+	/**
 	 * Translates the TOML content of a {@code script} metadata block into an
 	 * equivalent {@code pyproject.toml}:
 	 * <ul>

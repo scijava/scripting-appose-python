@@ -98,7 +98,7 @@ public class ResidentWorkerService extends AbstractService implements
 	{
 		final ResidentWorker stale;
 		final ResidentWorker worker;
-		final String key = activate == null ? name : name + "\0" + activate;
+		final String key = key(name, activate);
 		synchronized (entries) {
 			final Entry entry = entries.get(key);
 			if (entry != null && entry.config.equals(config)) return entry.worker;
@@ -112,6 +112,33 @@ public class ResidentWorkerService extends AbstractService implements
 		}
 		if (stale != null) stale.release();
 		return worker;
+	}
+
+	/**
+	 * Gets the resident worker for the named environment, if there is one with
+	 * the given configuration. Unlike {@link #worker}, this never creates,
+	 * replaces or releases anything, so it suits callers that must not disturb
+	 * running workers, such as code completion while the user edits the
+	 * environment's configuration.
+	 *
+	 * @param name Name of the environment.
+	 * @param activate Name of the activated sub-environment, or null for none.
+	 * @param config The environment's configuration, e.g. its file contents.
+	 * @return The worker, or null if there is none with that configuration.
+	 */
+	public ResidentWorker find(final String name, final String activate,
+		final String config)
+	{
+		synchronized (entries) {
+			final Entry entry = entries.get(key(name, activate));
+			return entry != null && entry.config.equals(config) ? entry.worker
+				: null;
+		}
+	}
+
+	/** The key of the named environment's worker with the given activation. */
+	private static String key(final String name, final String activate) {
+		return activate == null ? name : name + "\0" + activate;
 	}
 
 	/** Gets the current resident workers. */
