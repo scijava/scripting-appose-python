@@ -50,6 +50,8 @@ import org.scijava.code.api.CodeCompletionService;
 import org.scijava.code.api.Completion;
 import org.scijava.code.api.CompletionRequest;
 import org.scijava.code.api.CompletionResult;
+import org.scijava.code.api.Diagnostic;
+import org.scijava.code.api.Hover;
 import org.scijava.code.api.SignatureHelp;
 import org.scijava.module.ModuleService;
 import org.scijava.script.ScriptInfo;
@@ -149,6 +151,43 @@ public class ApposePythonCompletionIntegrationTest {
 		assertFalse(help.signatures().get(0).callable().parameters().isEmpty());
 		assertEquals(1, help.activeParameter());
 		assertEquals(code.indexOf('('), help.callStart());
+	}
+
+	@Test
+	public void testHover() throws Exception {
+		final String code = "import json\njson.dumps(1)";
+		final CompletionRequest request = new CompletionRequest(code, code
+			.indexOf("dumps") + 2, language, null, null, null);
+		final long deadline = System.currentTimeMillis() + BUILD_TIMEOUT;
+		Hover hover = Hover.NONE;
+		while (hover.isEmpty() && System.currentTimeMillis() < deadline) {
+			hover = completer().hover(request);
+			if (hover.update() != null) {
+				final Hover better = hover.update().get(1, TimeUnit.MINUTES);
+				if (better != null) hover = better;
+			}
+		}
+		assertTrue(hover.text(), hover.text().contains("JSON"));
+		assertEquals(code.indexOf("dumps"), hover.start());
+		assertEquals(code.indexOf("dumps") + "dumps".length(), hover.end());
+	}
+
+	@Test
+	public void testDiagnostics() throws Exception {
+		// A syntax error, on the script's third line.
+		final String code = "#@ double sigma\nx = sigma\ny = (1 +\n";
+		final long deadline = System.currentTimeMillis() + BUILD_TIMEOUT;
+		List<Diagnostic> problems = Collections.emptyList();
+		while (problems.isEmpty() && System.currentTimeMillis() < deadline) {
+			problems = completer().diagnose(new CompletionRequest(code, language,
+				null)).get(2, TimeUnit.MINUTES);
+		}
+		assertFalse(problems.isEmpty());
+		assertTrue(problems.toString(), problems.get(0).start() >= code.indexOf(
+			"y = "));
+		// Fixed: no more problems.
+		assertTrue(completer().diagnose(new CompletionRequest(code.replace("(1 +",
+			"(1 + 2)"), language, null)).get(1, TimeUnit.MINUTES).isEmpty());
 	}
 
 	@Test
