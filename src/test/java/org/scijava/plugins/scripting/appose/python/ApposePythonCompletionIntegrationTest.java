@@ -191,6 +191,32 @@ public class ApposePythonCompletionIntegrationTest {
 	}
 
 	@Test
+	public void testParameterBeforeEnvironment() throws Exception {
+		// An image parameter is a NumPy array: known, even though the script's
+		// environment is not built (here, it is not even declared).
+		completeUntil("#@ net.imglib2.img.Img image\nx = 1\nimage.", null,
+			"shape");
+	}
+
+	@Test
+	public void testServerOutlivesNoParent() throws Exception {
+		// The server, once its parent (this JVM) is gone, must exit: here, its
+		// parent is a process that already has.
+		completeUntil("import json\njson.du", null, "dumps");
+		final String python = ApposePythonCodeCompleter.pythonOnDisk(new File(
+			org.apposed.appose.util.Environments.apposeEnvsDir(),
+			ApposePythonCodeCompleter.TOOLING_ENV));
+		final Process gone = new ProcessBuilder(python, "-c", "pass").start();
+		gone.waitFor();
+		final Process server = new ProcessBuilder(python, "-c",
+			org.scijava.plugins.scripting.appose.python.completion.JediLanguageServerSpec.LAUNCHER,
+			String.valueOf(gone.pid())).redirectErrorStream(true).start();
+		final boolean exited = server.waitFor(30, TimeUnit.SECONDS);
+		if (!exited) server.destroyForcibly();
+		assertTrue(exited);
+	}
+
+	@Test
 	public void testNewDependency() throws Exception {
 		// A script declaring a dependency that is installed nowhere: its
 		// environment has not even been built.

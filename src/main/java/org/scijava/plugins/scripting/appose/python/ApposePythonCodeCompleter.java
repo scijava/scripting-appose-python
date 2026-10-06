@@ -642,8 +642,8 @@ public class ApposePythonCodeCompleter extends AbstractCodeCompleterPlugin {
 	}
 
 	/**
-	 * The tooling environment: Python, Jedi, jedi-language-server and Appose;
-	 * and uv, to install packages for {@link DependencyOverlays}.
+	 * The tooling environment: Python, Jedi, jedi-language-server, NumPy and
+	 * Appose; and uv, to install packages for {@link DependencyOverlays}.
 	 */
 	static String toolingConfig() {
 		return "[workspace]\n" + //
@@ -654,6 +654,9 @@ public class ApposePythonCodeCompleter extends AbstractCodeCompleterPlugin {
 			"[dependencies]\n" + //
 			"python = \"3.12.*\"\n" + //
 			"jedi = \">=0.19.2\"\n" + //
+			// NB: Script parameters are typed as NumPy arrays (see
+			// ApposePythonDialect): known even before a script's environment is.
+			"numpy = \"*\"\n" + //
 			"\n" + //
 			"[pypi-dependencies]\n" + //
 			"appose = \"*\"\n" + //
