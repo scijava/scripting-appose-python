@@ -48,8 +48,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.function.Function;
-import java.util.function.Supplier;
 
 import org.apposed.appose.Appose;
 import org.apposed.appose.Environment;
@@ -66,15 +64,19 @@ import org.scijava.code.api.EnvironmentContext;
 import org.scijava.code.api.ScriptDialect;
 import org.scijava.code.api.ScriptDocument;
 import org.scijava.code.api.SignatureHelp;
-import org.scijava.code.api.SignatureHelp.Fit;
 import org.scijava.code.api.Signatures;
+import org.scijava.code.lsp.LspClient;
+import org.scijava.code.lsp.LspServers;
+import org.scijava.log.LogService;
+import org.scijava.log.StderrLogService;
 import org.scijava.plugin.Plugin;
 import org.scijava.plugins.scripting.appose.python._internal.InlineMetadata;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorker;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerService;
 import org.scijava.plugins.scripting.appose.python.completion.ApposePythonDialect;
 import org.scijava.plugins.scripting.appose.python.completion.DependencyOverlays;
-import org.scijava.plugins.scripting.appose.python.completion.JediClient;
+import org.scijava.plugins.scripting.appose.python.completion.JediLanguageServerSpec;
+import org.scijava.plugins.scripting.appose.python.completion.PythonLspClient;
 import org.scijava.plugins.scripting.appose.python.completion.PythonSyntax;
 import org.scijava.plugins.scripting.appose.python.completion.PythonSyntax.Kind;
 import org.scijava.script.ScriptLanguage;
@@ -86,12 +88,13 @@ import org.scijava.script.ScriptLanguage;
  * <li>{@link PythonSyntax} (tree-sitter, in process): instantly, with no
  * Python needed, names in scope, the script's parameters, builtins and
  * keywords.</li>
- * <li>Jedi, in a small tooling environment of its own, built in the
- * background on first use: members of objects and modules, signatures and
- * documentation. Once the script's own environment is built (by running the
- * script), Jedi analyzes the script against it, so its packages are known.
- * Jedi's answers are used if they come within a short time budget; typing
- * never waits for them.</li>
+ * <li>jedi-language-server (a language server built on Jedi), in a small
+ * tooling environment of its own, built in the background on first use:
+ * members of objects and modules, signatures and documentation. Once the
+ * script's own environment is built (by running the script), the server
+ * analyzes the script against it, so its packages are known. Its answers are
+ * used if they come within a short time budget; typing never waits for
+ * them.</li>
  * </ol>
  * <p>
  * Completion never builds a script's environment, and never disturbs its
@@ -103,24 +106,27 @@ import org.scijava.script.ScriptLanguage;
 @Plugin(type = CodeCompleterPlugin.class, name = "appose-python")
 public class ApposePythonCodeCompleter extends AbstractCodeCompleterPlugin {
 
-	/** Name of the tooling environment in which Jedi runs. */
+	/** Name of the tooling environment in which the language server runs. */
 	static final String TOOLING_ENV = "appose-python-completion";
 
 	/**
-	 * How long to wait for Jedi before answering without it (and updating the
-	 * answer once Jedi's arrives), in milliseconds.
+	 * How long to wait for the language server before answering without it
+	 * (and updating the answer once its arrives), in milliseconds.
 	 */
 	private static final long BUDGET = Long.getLong(
 		"scijava.appose.completion.budget", 25);
 
-	/** How long to wait for a completion's documentation, in milliseconds. */
-	private static final long DESCRIBE_BUDGET = 1000;
-
 	/** How many completions get signatures, once a word is begun. */
 	private static final int SIGNATURES = 30;
 
-	/** How many signatures (overloads) each gets, at most. */
-	private static final int OVERLOADS = 8;
+	/** How long a language server may go unused before it stops, in ms. */
+	private static final long SERVER_IDLE = 10 * 60 * 1000;
+
+	/**
+	 * How many language servers may run at once (one per script environment
+	 * and overlay).
+	 */
+	private static final int MAX_SERVERS = 3;
 
 	/** Python executables of script environments, by script and metadata. */
 	private final Map<String, String> pythons = new LinkedHashMap<String, String>(
@@ -135,10 +141,10 @@ public class ApposePythonCodeCompleter extends AbstractCodeCompleterPlugin {
 		}
 	};
 
-	/** Task scripts (see jedi_complete.py, overlay.py), by resource name. */
+	/** Task scripts (see overlay.py), by resource name. */
 	private static final Map<String, String> SCRIPTS = new HashMap<>();
 
-	private JediClient jedi;
+	private LspClient lsp;
 
 	private DependencyOverlays overlays;
 
@@ -166,40 +172,55 @@ public class ApposePythonCodeCompleter extends AbstractCodeCompleterPlugin {
 			return CompletionResult.EMPTY;
 		}
 
-		final JediClient client = jediClient();
+		final LspClient client = lspClient();
 		final ScriptDocument doc = document(request, client != null, false);
 		final List<Completion> local = localCompletions(ctx, doc.parameters());
-		final CompletableFuture<List<Completion>> answer = client == null ? null
-			: jediCompletions(client, request, ctx, doc);
-		if (answer == null) return merge(ctx, null, local);
+		if (client == null) return merge(ctx, null, local);
+		// Ask about the first character typed, if any: later keystrokes of the
+		// same word then reuse the answer (filtered), while it stays short.
+		// NB: Signatures are expensive, so ask for them only once a word is
+		// begun, which narrows the completions down. Before that, functions are
+		// offered by name.
+		final CompletableFuture<List<Completion>> answer = client.complete(doc,
+			uri(request), ctx.replaceStart + Math.min(1, ctx.prefix.length()),
+			ctx.prefix.isEmpty() ? 0 : SIGNATURES);
 
-		// Use Jedi's answer if it is (almost) ready; otherwise answer without it
-		// at once, and announce the better result to follow.
+		// Use the server's answer if it is (almost) ready; otherwise answer
+		// without it at once, and announce the better result to follow.
 		try {
 			return merge(ctx, answer.get(BUDGET, TimeUnit.MILLISECONDS), local);
 		}
 		catch (final TimeoutException exc) {
-			return merge(ctx, null, local).withUpdate(answer.handle((jedi,
-				error) -> jedi == null ? null : merge(ctx, jedi, local)));
+			return merge(ctx, null, local).withUpdate(answer.handle((server,
+				error) -> server == null ? null : merge(ctx, server, local)));
 		}
 		catch (final InterruptedException exc) {
 			Thread.currentThread().interrupt();
 		}
 		catch (final ExecutionException | CancellationException exc) {
-			// NB: Jedi failed; the next request asks again.
+			// NB: The server failed (and said why in the log); the next request
+			// asks again.
 		}
 		return merge(ctx, null, local);
 	}
 
 	@Override
 	public void prepare(final CompletionRequest request) {
-		// Warm up: start Jedi (building its environment, if needed), and have it
-		// analyze the script against its environment, in the background.
-		final JediClient client = jediClient();
+		// Warm up: start the language server (building its environment, if
+		// needed), and have it analyze the script against its environment, in
+		// the background.
+		final LspClient client = lspClient();
 		if (client == null) return;
-		final ScriptDocument doc = document(request, true, true);
-		client.answer("prepare\n" + request.path() + "\n" + request.text(), query(
-			doc, request.text().length(), request.path(), 0));
+		client.prepare(document(request, true, true), uri(request));
+	}
+
+	@Override
+	public void closed(final CompletionRequest request) {
+		final LspClient client;
+		synchronized (this) {
+			client = lsp;
+		}
+		if (client != null) client.close(uri(request));
 	}
 
 	@Override
@@ -218,17 +239,13 @@ public class ApposePythonCodeCompleter extends AbstractCodeCompleterPlugin {
 		if (open < 0) return SignatureHelp.NONE;
 		final List<String> args = Signatures.arguments(text, open, caret);
 		if (args == null) return SignatureHelp.NONE;
-		final JediClient client = jediClient();
+		final LspClient client = lspClient();
 		if (client == null) return SignatureHelp.NONE;
 
-		final ScriptDocument doc = document(request, true, false);
-		final JediClient.Query query = query(doc, caret, request.path(), 0);
-		final int active = args.size() - 1;
-		// NB: Where Jedi cannot tell the argument, count the commas.
-		final CompletableFuture<SignatureHelp> help = client.signatures(
-			"signatures\n" + key(doc, caret, request.path()), query).handle((h, error) -> h == null ? null
-					: new SignatureHelp(h.signatures(), h.activeParameter() >= 0 ? h
-						.activeParameter() : active, open));
+		// NB: Where the server cannot tell the argument, count the commas.
+		final CompletableFuture<SignatureHelp> help = client.signatureHelp(
+			document(request, true, false), uri(request), caret, open, args.size() -
+				1).handle((h, error) -> h);
 		try {
 			final SignatureHelp h = help.get(BUDGET, TimeUnit.MILLISECONDS);
 			return h == null ? SignatureHelp.NONE : h;
@@ -240,43 +257,23 @@ public class ApposePythonCodeCompleter extends AbstractCodeCompleterPlugin {
 			Thread.currentThread().interrupt();
 		}
 		catch (final ExecutionException | CancellationException exc) {
-			// NB: Jedi failed.
+			// NB: The server failed.
 		}
 		return SignatureHelp.NONE;
 	}
 
 	/**
-	 * Adapts the "signatures" task output to the shape of "completions" items
-	 * (one item per signature), for {@link #toCompletions}.
-	 */
-	@SuppressWarnings("unchecked")
-	private static List<Object> signatureItems(final Object output) {
-		final List<Object> items = new ArrayList<>();
-		if (!(output instanceof List)) return items;
-		for (final Object o : (List<?>) output) {
-			if (!(o instanceof Map)) continue;
-			final Map<String, Object> sig = (Map<String, Object>) o;
-			final Map<String, Object> item = new HashMap<>();
-			item.put("name", sig.get("name"));
-			item.put("type", "function");
-			item.put("signatures", Collections.singletonList(sig));
-			items.add(item);
-		}
-		return items;
-	}
-
-	/**
-	 * Merges Jedi's completions (if any) with the local ones: Jedi's first,
-	 * since they carry types, signatures and documentation; then whatever only
-	 * the local analysis knows.
+	 * Merges the server's completions (if any) with the local ones: the
+	 * server's first, since they carry types, signatures and documentation;
+	 * then whatever only the local analysis knows.
 	 */
 	private static CompletionResult merge(final PythonSyntax.Context ctx,
-		final List<Completion> jedi, final List<Completion> local)
+		final List<Completion> server, final List<Completion> local)
 	{
 		final List<Completion> out = new ArrayList<>();
 		final Set<String> seen = new HashSet<>();
-		if (jedi != null) {
-			for (final Completion c : jedi) {
+		if (server != null) {
+			for (final Completion c : server) {
 				if (!matches(c.insertionText(), ctx.prefix)) continue;
 				if (ctx.kind == Kind.IMPORT) {
 					// NB: An import names things rather than calling them: one plain
@@ -299,9 +296,9 @@ public class ApposePythonCodeCompleter extends AbstractCodeCompleterPlugin {
 		this.overlays = overlays;
 	}
 
-	/** Sets the Jedi client, e.g. to use a fake one in tests. */
-	synchronized void setJediClient(final JediClient jedi) {
-		this.jedi = jedi;
+	/** Sets the language server client, e.g. to use a fake one in tests. */
+	synchronized void setLspClient(final LspClient lsp) {
+		this.lsp = lsp;
 	}
 
 	// -- Helper methods --
@@ -355,27 +352,8 @@ public class ApposePythonCodeCompleter extends AbstractCodeCompleterPlugin {
 	}
 
 	/**
-	 * Asks Jedi for completions.
-	 *
-	 * @return Jedi's answer, or pending answer; or null if Jedi is unavailable.
-	 */
-	private static CompletableFuture<List<Completion>> jediCompletions(
-		final JediClient client, final CompletionRequest request,
-		final PythonSyntax.Context ctx, final ScriptDocument doc)
-	{
-		// Ask about the first character typed, if any: later keystrokes of the
-		// same word then reuse the answer (filtered), while it stays short.
-		final int caret = ctx.replaceStart + Math.min(1, ctx.prefix.length());
-		// NB: Signatures are expensive, so ask for them only once a word is
-		// begun, which narrows the completions down. Before that, functions are
-		// offered by name.
-		final JediClient.Query query = query(doc, caret, request.path(), ctx.prefix
-			.isEmpty() ? 0 : SIGNATURES);
-		return client.answer(key(doc, caret, request.path()), query);
-	}
-
-	/**
-	 * Gets the script as plain Python, for Jedi: its parameters declared, and
+	 * Gets the script as plain Python, for the server: its parameters
+	 * declared, and
 	 * (if asked) where it runs: its environment's Python, and its overlay.
 	 *
 	 * @param environment Whether to find where the script runs.
@@ -399,30 +377,9 @@ public class ApposePythonCodeCompleter extends AbstractCodeCompleterPlugin {
 		return ScriptDocument.of(text, params, DIALECT, env);
 	}
 
-	/** Asks Jedi about the given offset of the script. */
-	private static JediClient.Query query(final ScriptDocument doc,
-		final int offset, final String path, final int flags)
-	{
-		final String before = doc.text().substring(0, doc.map().toTransformed(
-			offset));
-		final int line = count(before, '\n') + 1;
-		final int column = before.length() - before.lastIndexOf('\n') - 1;
-		final EnvironmentContext env = doc.environment();
-		final String overlay = env.searchPaths().isEmpty() ? null : env
-			.searchPaths().get(0);
-		return new JediClient.Query(doc.text(), line, column, path, env
-			.interpreter(), flags, overlay);
-	}
-
-	/** Identifies a question about the given offset, for reusing answers. */
-	private static String key(final ScriptDocument doc, final int offset,
-		final String path)
-	{
-		final EnvironmentContext env = doc.environment();
-		final String overlay = env.searchPaths().isEmpty() ? null : env
-			.searchPaths().get(0);
-		return env.interpreter() + "\n" + overlay + "\n" + path + "\n" + doc
-			.text().substring(0, doc.map().toTransformed(offset));
+	/** The URI of the script, for the language server. */
+	private static String uri(final CompletionRequest request) {
+		return LspClient.uri(request.path(), "script.py");
 	}
 
 	/**
@@ -610,91 +567,27 @@ public class ApposePythonCodeCompleter extends AbstractCodeCompleterPlugin {
 		return null;
 	}
 
-	/** Gets the Jedi client, creating it on first use. */
-	private synchronized JediClient jediClient() {
-		if (jedi != null) return jedi;
+	/** Gets the language server client, creating it on first use. */
+	private synchronized LspClient lspClient() {
+		if (lsp != null) return lsp;
 		final ResidentWorkerService workers = service(
 			ResidentWorkerService.class);
 		if (workers == null) return null;
-		final JediClient[] client = { null };
-		client[0] = new JediClient(new JediClient.Backend() {
-
-			@Override
-			public List<Completion> complete(final String key,
-				final JediClient.Query query)
-			{
-				final Object output = runJedi(workers, "complete", key, query, null)
-					.get("completions");
-				// NB: Documentation is fetched only for completions looked at.
-				return toCompletions(output, name -> () -> client[0].describe(key,
-					query, name, DESCRIBE_BUDGET));
-			}
-
-			@Override
-			public SignatureHelp signatures(final String key,
-				final JediClient.Query query)
-			{
-				final Map<String, Object> outputs = runJedi(workers, "signatures", key,
-					query, null);
-				final List<SignatureHelp.Signature> signatures = new ArrayList<>();
-				for (final Completion c : toCompletions(signatureItems(outputs.get(
-					"signatures"))))
-				{
-					// NB: Python's conversions are not rated yet: Jedi's order.
-					signatures.add(new SignatureHelp.Signature(c, Fit.UNKNOWN));
-				}
-				final Object index = outputs.get("index");
-				return new SignatureHelp(signatures, index instanceof Number
-					? ((Number) index).intValue() : -1, -1);
-			}
-
-			@Override
-			public String describe(final String key, final JediClient.Query query,
-				final String name)
-			{
-				final Object doc = runJedi(workers, "describe", key, query, name).get(
-					"docstring");
-				return doc instanceof String && !((String) doc).isEmpty() ? "<pre>" +
-					escapeHTML((String) doc) + "</pre>" : null;
-			}
-		});
-		jedi = client[0];
-		return jedi;
-	}
-
-	/**
-	 * Runs a Jedi task (see jedi_complete.py) on the tooling environment's
-	 * worker, building the environment first, if needed. Called on the Jedi
-	 * client's background thread.
-	 *
-	 * @return The task's outputs.
-	 */
-	private static Map<String, Object> runJedi(
-		final ResidentWorkerService workers, final String op, final String key,
-		final JediClient.Query query, final String name)
-	{
-		final ResidentWorker worker = toolingWorker(workers);
-		final Map<String, Object> inputs = new HashMap<>();
-		inputs.put("op", op);
-		inputs.put("key", key);
-		inputs.put("source", query.source);
-		inputs.put("line", query.line);
-		inputs.put("column", query.column);
-		inputs.put("path", query.path);
-		inputs.put("python", query.python);
-		inputs.put("max_signatures", query.signatures);
-		inputs.put("max_overloads", OVERLOADS);
-		inputs.put("name", name);
-		inputs.put("overlay", query.overlay);
-		try {
-			final Service.Task task = worker.task(resource(
-				"completion/jedi_complete.py"), inputs);
-			task.waitFor();
-			return task.outputs;
-		}
-		catch (final Exception exc) {
-			throw new IllegalStateException("Jedi failed", exc);
-		}
+		LogService log = service(LogService.class);
+		if (log == null) log = new StderrLogService();
+		final File envs = new File(Environments.apposeEnvsDir());
+		final JediLanguageServerSpec spec = new JediLanguageServerSpec(() -> {
+			// NB: Builds the tooling environment, if needed (but starts no worker).
+			final String python = pythonExecutable(toolingWorker(workers)
+				.environment().get());
+			if (python == null) throw new IOException("No Python in " +
+				TOOLING_ENV);
+			return python;
+		}, new File(envs, TOOLING_ENV + "-workspace"), new File(envs, TOOLING_ENV +
+			"-server.log"));
+		lsp = new PythonLspClient(new LspServers(spec, log, SERVER_IDLE,
+			MAX_SERVERS));
+		return lsp;
 	}
 
 	/** Gets the tooling environment's worker, building it first if needed. */
@@ -707,8 +600,8 @@ public class ApposePythonCodeCompleter extends AbstractCodeCompleterPlugin {
 	}
 
 	/**
-	 * The tooling environment: Python, Jedi and Appose; and uv, to install
-	 * packages for {@link DependencyOverlays}.
+	 * The tooling environment: Python, Jedi, jedi-language-server and Appose;
+	 * and uv, to install packages for {@link DependencyOverlays}.
 	 */
 	static String toolingConfig() {
 		return "[workspace]\n" + //
@@ -722,87 +615,11 @@ public class ApposePythonCodeCompleter extends AbstractCodeCompleterPlugin {
 			"\n" + //
 			"[pypi-dependencies]\n" + //
 			"appose = \"*\"\n" + //
+			"jedi-language-server = \">=0.47\"\n" + //
 			"uv = \"*\"\n";
 	}
 
-	/** Converts the task's output (see jedi_complete.py) to completions. */
-	static List<Completion> toCompletions(final Object output) {
-		return toCompletions(output, null);
-	}
-
-	/**
-	 * Converts the task's output (see jedi_complete.py) to completions.
-	 *
-	 * @param docs Supplies documentation, by completion name, on demand; or
-	 *          null if there is none.
-	 */
-	@SuppressWarnings("unchecked")
-	static List<Completion> toCompletions(final Object output,
-		final Function<String, Supplier<String>> docs)
-	{
-		if (!(output instanceof List)) return Collections.emptyList();
-		final List<Completion> out = new ArrayList<>();
-		for (final Object o : (List<?>) output) {
-			if (!(o instanceof Map)) continue;
-			final Map<String, Object> item = (Map<String, Object>) o;
-			final String name = (String) item.get("name");
-			if (name == null) continue;
-			final String type = (String) item.get("type");
-			final String doc = (String) item.get("docstring");
-			final Supplier<String> description = doc != null ? () -> "<pre>" +
-				escapeHTML(doc) + "</pre>" : docs != null ? docs.apply(name) : null;
-			final List<Object> signatures = item.get(
-				"signatures") instanceof List ? (List<Object>) item.get("signatures")
-					: Collections.emptyList();
-			if (signatures.isEmpty()) {
-				// NB: Without a signature, even a function is offered by name only.
-				final Completion.Kind kind = kind(type);
-				out.add(Completion.builder(name).kind(kind == Completion.Kind.METHOD
-					? Completion.Kind.OTHER : kind).summary((String) item.get(
-						"description")).lazyDescription(description).build());
-				continue;
-			}
-			// One completion per signature, e.g. for each typing.overload.
-			for (final Object s : signatures) {
-				final Map<String, Object> sig = (Map<String, Object>) s;
-				final List<Completion.Parameter> params = new ArrayList<>();
-				for (final Object p : (List<Object>) sig.get("params")) {
-					final List<Object> param = (List<Object>) p;
-					params.add(new Completion.Parameter((String) param.get(0),
-						(String) param.get(1)));
-				}
-				out.add(Completion.builder(name).kind(Completion.Kind.METHOD)
-					.parameters(params).returnType((String) sig.get("returns")).summary(
-						(String) item.get("description")).lazyDescription(description)
-					.build());
-			}
-		}
-		return out;
-	}
-
-	private static Completion.Kind kind(final String jediType) {
-		if (jediType == null) return Completion.Kind.OTHER;
-		switch (jediType) {
-			case "function":
-				return Completion.Kind.METHOD;
-			case "class":
-				return Completion.Kind.CLASS;
-			case "module":
-				return Completion.Kind.PACKAGE;
-			case "property":
-				return Completion.Kind.FIELD;
-			case "keyword":
-				return Completion.Kind.KEYWORD;
-			case "instance":
-			case "statement":
-			case "param":
-				return Completion.Kind.VARIABLE;
-			default:
-				return Completion.Kind.OTHER;
-		}
-	}
-
-	/** Gets a task script (e.g. jedi_complete.py), by resource name. */
+	/** Gets a task script (e.g. overlay.py), by resource name. */
 	private static String resource(final String name) throws IOException {
 		synchronized (SCRIPTS) {
 			final String known = SCRIPTS.get(name);
@@ -835,17 +652,5 @@ public class ApposePythonCodeCompleter extends AbstractCodeCompleterPlugin {
 		if (name.startsWith("__") && !prefix.startsWith("_")) return false;
 		return name.toLowerCase(Locale.ROOT).startsWith(prefix.toLowerCase(
 			Locale.ROOT)) && !name.equals(prefix);
-	}
-
-	private static int count(final String s, final char c) {
-		int n = 0;
-		for (int i = 0; i < s.length(); i++) {
-			if (s.charAt(i) == c) n++;
-		}
-		return n;
-	}
-
-	private static String escapeHTML(final String s) {
-		return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
 	}
 }

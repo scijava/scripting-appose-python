@@ -143,15 +143,22 @@ The Script Editor completes code in these scripts, in two layers:
   functions, classes, imports, parameters of the enclosing function), the
   script's `#@` parameters, `task`, builtins and keywords. This comes from
   parsing the script with [tree-sitter](https://tree-sitter.github.io/).
-* **With [Jedi](https://jedi.readthedocs.io/):** members of objects and
+* **With a language server,
+  [jedi-language-server](https://github.com/pappasam/jedi-language-server)
+  (built on [Jedi](https://jedi.readthedocs.io/)):** members of objects and
   modules, function signatures (with parameter names and types) and
-  documentation. Jedi runs in a small environment of its own
-  (`appose-python-completion`: Python, Jedi and Appose), which is built in
-  the background the first time you complete code, and takes a while only
-  then.
+  documentation. The server runs in a small environment of its own
+  (`appose-python-completion`: Python, jedi-language-server, Appose and uv),
+  which is built in the background the first time you complete code, and
+  takes a while only then. The server talks to the editor via the
+  [Language Server Protocol](https://microsoft.github.io/language-server-protocol/)
+  (see `scijava-code-lsp`); it sees the script as plain Python, with its `#@`
+  parameters declared. One server runs per script environment; servers
+  unused for 10 minutes stop. Their error output goes to
+  `appose-python-completion-server.log`, next to Appose's environments.
 
 Once a script's environment is built, by running the script (in this session
-or an earlier one), Jedi analyzes the script against it, so that the packages
+or an earlier one), the server analyzes the script against it, so that the packages
 installed there are known too. Packages the script declares (in its
 `# /// script` block) but its environment lacks, e.g. a dependency you just
 added, are installed for completion only, into a separate directory, a moment
@@ -162,6 +169,7 @@ Completion never builds a script's environment itself, and never disturbs
 its worker. Script parameters are known by the Python types they have at run
 time, e.g. images as NumPy arrays.
 
-Typing never waits for Jedi: if its answer for a word is not ready within a
-moment (the first answer for a package can take a few seconds), the instant
-completions show, and Jedi's are used once ready.
+Typing never waits for the server: if its answer for a word is not ready
+within a moment (the first answer for a package can take a few seconds), the
+instant completions show, and the server's are used once ready. Questions
+that are no longer of interest (e.g. as you type on) are cancelled.

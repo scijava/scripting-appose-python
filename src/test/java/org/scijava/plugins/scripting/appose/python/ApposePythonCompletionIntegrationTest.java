@@ -58,11 +58,13 @@ import org.scijava.script.ScriptModule;
 import org.scijava.script.ScriptService;
 
 /**
- * End-to-end tests of {@link ApposePythonCodeCompleter} with a real Jedi.
+ * End-to-end tests of {@link ApposePythonCodeCompleter} with a real language
+ * server (jedi-language-server).
  * <p>
  * The first completion builds the completion tooling environment (Python and
- * Jedi, via pixi), and a script run builds the small uv environment of
- * {@code appose-test/requirements.txt}; both require network access.
+ * jedi-language-server, via pixi), and a script run builds the small uv
+ * environment of {@code appose-test/requirements.txt}; both require network
+ * access.
  * </p>
  *
  * @author Gabriel Selzer
@@ -97,7 +99,7 @@ public class ApposePythonCompletionIntegrationTest {
 
 	@Test
 	public void testStandardLibrary() throws Exception {
-		// Before any script environment is built, Jedi knows the standard
+		// Before any script environment is built, the server knows the standard
 		// library, with signatures and documentation.
 		final List<Completion> completions = completeUntil(
 			"import json\njson.du", null, "dumps");
@@ -123,7 +125,7 @@ public class ApposePythonCompletionIntegrationTest {
 		moduleService.run(module, false, Collections.singletonMap("image",
 			null)).get();
 
-		// Now Jedi analyzes the script against its environment: numpy is known,
+		// Now the server analyzes the script against its environment: numpy is known,
 		// and so is the type of the image parameter.
 		completeUntil(header + "np.ze", script.getPath(), "zeros");
 		completeUntil(header + "image.sha", script.getPath(), "shape");
@@ -200,8 +202,8 @@ public class ApposePythonCompletionIntegrationTest {
 
 	/**
 	 * Prints how long completions take, once warm: for another keystroke of a
-	 * word Jedi has answered (cached); and for a new word, how long the editor
-	 * waits (barely: it answers at once), and how long until Jedi's completions
+	 * word the server has answered (cached); and for a new word, how long the editor
+	 * waits (barely: it answers at once), and how long until the server's completions
 	 * arrive as an update.
 	 */
 	private static void report(final String code, final String path,
@@ -221,7 +223,7 @@ public class ApposePythonCompletionIntegrationTest {
 		final long arrived = System.nanoTime() - t0;
 		System.out.println("[completion timing] same word (cached): " + cached /
 			1000000 + " ms, " + n + " completions; new word: editor waits " + wait /
-				1000000 + " ms, Jedi's " + update.completions().size() +
+				1000000 + " ms, the server's " + update.completions().size() +
 			" completions after " + arrived / 1000000 + " ms");
 	}
 }
