@@ -34,19 +34,19 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import net.imglib2.img.Img;
 
+import org.eclipse.lsp4j.Position;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -54,14 +54,18 @@ import org.scijava.Context;
 import org.scijava.code.api.CodeCompletionService;
 import org.scijava.code.api.Completion;
 import org.scijava.code.api.CompletionRequest;
+import org.scijava.code.api.EnvironmentContext;
+import org.scijava.code.api.ScriptDocument;
+import org.scijava.code.api.SignatureHelp;
+import org.scijava.code.lsp.LspClient;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerService;
 import org.scijava.plugins.scripting.appose.python.completion.ApposePythonDialect;
-import org.scijava.plugins.scripting.appose.python.completion.JediClient;
+import org.scijava.plugins.scripting.appose.python.completion.JediLanguageServerSpec;
 import org.scijava.script.ScriptLanguage;
 import org.scijava.script.ScriptService;
 
 /**
- * Tests {@link ApposePythonCodeCompleter}, with a fake Jedi.
+ * Tests {@link ApposePythonCodeCompleter}, with a fake language server client.
  *
  * @author Gabriel Selzer
  */
@@ -97,7 +101,7 @@ public class ApposePythonCodeCompleterTest {
 
 	@Test
 	public void testLocalCompletions() {
-		noJedi();
+		noServer();
 		final String header = "#@ net.imglib2.img.Img image\n#@ double sigma\n";
 		final List<String> names = complete(header +
 			"def blur(img, s):\n    result = img\n    re");
@@ -112,12 +116,12 @@ public class ApposePythonCodeCompleterTest {
 	}
 
 	@Test
-	public void testJediResultsMergedFirst() {
+	public void testServerResultsMergedFirst() {
 		final Completion zeros = Completion.builder("zeros").kind(
 			Completion.Kind.METHOD).parameters(Collections.singletonList(
 				new Completion.Parameter("shape", "_ShapeLike"))).build();
 		final Completion zeta = Completion.of("zeta");
-		completer.setJediClient(new JediClient(q -> Arrays.asList(zeros, zeta)));
+		fake(q -> Arrays.asList(zeros, zeta));
 		final List<Completion> completions = completions(
 			"import numpy as np\nnp.zeros(3)\nnp.ze");
 		assertEquals("zeros", completions.get(0).insertionText());
@@ -128,13 +132,12 @@ public class ApposePythonCodeCompleterTest {
 
 	@Test
 	public void testImportsAreNames() {
-		// Jedi reports imshow as a function, once per overload.
+		// The server reports imshow as a function, with its signature.
 		final Completion imshow = Completion.builder("imshow").kind(
 			Completion.Kind.METHOD).parameters(Collections.singletonList(
 				new Completion.Parameter("data", "Any"))).summary("def imshow")
 			.build();
-		completer.setJediClient(new JediClient(q -> Arrays.asList(imshow,
-			imshow)));
+		fake(q -> Arrays.asList(imshow, imshow));
 		// In an import, it is a name to import, not a call: listed once, without
 		// a parameter list for the editor to insert.
 		final List<Completion> imported = completions("from ndv import i");
@@ -147,40 +150,23 @@ public class ApposePythonCodeCompleterTest {
 	}
 
 	@Test
-	public void testTimeBudgetAndReuse() throws InterruptedException {
-		final AtomicInteger calls = new AtomicInteger();
-		final CountDownLatch release = new CountDownLatch(1);
-		final CountDownLatch done = new CountDownLatch(1);
-		completer.setJediClient(new JediClient(q -> {
-			calls.incrementAndGet();
-			try {
-				release.await();
-			}
-			catch (final InterruptedException exc) {
-				Thread.currentThread().interrupt();
-			}
-			done.countDown();
-			return Collections.singletonList(Completion.of("zeros"));
-		}));
-		// Jedi is slow: the local results come back, in time.
-		final String code = "import numpy as np\nnp.zeros(3)\nnp.z";
-		final long start = System.nanoTime();
-		final List<String> first = complete(code);
-		assertTrue(System.nanoTime() - start < TimeUnit.SECONDS.toNanos(2));
-		assertEquals(Collections.singletonList("zeros"), first); // used before
-		// Once Jedi answers, later keystrokes of the word reuse its answer.
-		release.countDown();
-		assertTrue(done.await(5, TimeUnit.SECONDS));
-		Thread.sleep(50);
-		assertTrue(complete(code + "e").contains("zeros"));
-		assertTrue(complete(code + "er").contains("zeros"));
-		assertEquals(1, calls.get());
+	public void testSameQuestionWhileTyping() {
+		final FakeLsp fake = fake(q -> Collections.singletonList(Completion.of(
+			"zeros")));
+		// Later keystrokes of a word ask about its first character, so that the
+		// client can reuse the answer.
+		final String code = "import numpy as np\nnp.z";
+		complete(code);
+		complete(code + "e");
+		complete(code + "er");
+		assertEquals(3, fake.asked.size());
+		for (final Asked a : fake.asked) assertEquals(code.length(), a.offset);
 	}
 
 	@Test
-	public void testUpdateWhenJediIsSlow() throws Exception {
+	public void testUpdateWhenServerIsSlow() throws Exception {
 		final CountDownLatch release = new CountDownLatch(1);
-		completer.setJediClient(new JediClient(q -> {
+		fake(q -> {
 			try {
 				release.await();
 			}
@@ -188,14 +174,16 @@ public class ApposePythonCodeCompleterTest {
 				Thread.currentThread().interrupt();
 			}
 			return Collections.singletonList(Completion.of("zeros"));
-		}));
+		});
 		// At once: what is known locally, and the announcement of more.
 		final String code = "import numpy as np\nnp.z";
+		final long start = System.nanoTime();
 		final org.scijava.code.api.CompletionResult first = service.complete(
 			new CompletionRequest(code, language, null));
+		assertTrue(System.nanoTime() - start < TimeUnit.SECONDS.toNanos(2));
 		assertTrue(first.completions().isEmpty());
 		assertTrue(first.update() != null);
-		// Then Jedi's answer, merged.
+		// Then the server's answer, merged.
 		release.countDown();
 		final org.scijava.code.api.CompletionResult better = first.update().get(5,
 			TimeUnit.SECONDS);
@@ -204,75 +192,24 @@ public class ApposePythonCodeCompleterTest {
 	}
 
 	@Test
-	public void testLazyDocumentation() {
-		final List<String> described = new java.util.ArrayList<>();
-		final String[] keys = { null, null };
-		completer.setJediClient(new JediClient(new JediClient.Backend() {
-
-			@Override
-			public List<Completion> complete(final String key,
-				final JediClient.Query query)
-			{
-				keys[0] = key;
-				final Map<String, Object> zeros = new HashMap<>();
-				zeros.put("name", "zeros");
-				zeros.put("type", "function");
-				return ApposePythonCodeCompleter.toCompletions(Collections
-					.singletonList(zeros), name -> () -> {
-						described.add(name);
-						keys[1] = key;
-						return "Return a new array of zeros.";
-					});
-			}
-
-			@Override
-			public String describe(final String key, final JediClient.Query query,
-				final String name)
-			{
-				return null;
-			}
-		}));
-		final Completion zeros = completions("import numpy\nnumpy.z").get(0);
-		// Not described until asked, then by the same query.
-		assertTrue(described.isEmpty());
-		assertEquals("Return a new array of zeros.", zeros.description());
-		assertEquals(Collections.singletonList("zeros"), described);
-		assertEquals(keys[0], keys[1]);
-	}
-
-	@Test
 	public void testSignaturesOnlyOnceWordBegun() {
-		final List<Integer> signatures = new java.util.ArrayList<>();
-		completer.setJediClient(new JediClient(q -> {
-			signatures.add(q.signatures);
-			return Collections.emptyList();
-		}));
+		final FakeLsp fake = fake(q -> Collections.emptyList());
 		complete("import numpy\nnumpy.");
 		complete("import numpy\nnumpy.z");
-		assertEquals(Arrays.asList(0, 30), signatures);
-		// A function without signature is offered by name, not as a call.
-		final Map<String, Object> zeros = new HashMap<>();
-		zeros.put("name", "zeros");
-		zeros.put("type", "function");
-		final Completion plain = ApposePythonCodeCompleter.toCompletions(
-			Collections.singletonList(zeros)).get(0);
-		assertFalse(plain.isCallable());
+		assertEquals(Arrays.asList(0, 30), fake.asked.stream().map(a -> a.resolve)
+			.collect(Collectors.toList()));
 	}
 
 	@Test
 	public void testOverlayInQuery() throws Exception {
 		// A script declaring a dependency its environment lacks.
-		final List<List<String>> installed = new java.util.ArrayList<>();
+		final List<List<String>> installed = new ArrayList<>();
 		completer.setOverlays(new org.scijava.plugins.scripting.appose.python.completion.DependencyOverlays(
 			(python, dependencies, dir) -> {
 				installed.add(dependencies);
 				return "/overlays/blur";
 			}, new java.io.File("overlays"), 0, System::currentTimeMillis));
-		final List<JediClient.Query> queries = new java.util.ArrayList<>();
-		completer.setJediClient(new JediClient(q -> {
-			queries.add(q);
-			return Collections.emptyList();
-		}));
+		final FakeLsp fake = fake(q -> Collections.emptyList());
 		final String code = "# /// script\n# dependencies = [\"tifffile\"]\n" +
 			"# ///\nimport tifffile\ntifffile.im";
 		// The first request notes the dependencies; once they have stayed the
@@ -282,58 +219,36 @@ public class ApposePythonCodeCompleterTest {
 		for (int i = 0; i < 100 && installed.isEmpty(); i++) Thread.sleep(20);
 		Thread.sleep(50);
 		complete(code + "r");
-		// Once the overlay is ready, Jedi searches it too (anew: a new key).
+		// Once the overlay is ready, the server searches it too.
 		assertEquals(Collections.singletonList(Collections.singletonList(
 			"tifffile")), installed);
-		assertEquals("/overlays/blur", queries.get(queries.size() - 1).overlay);
+		assertEquals(Collections.singletonList("/overlays/blur"), last(fake).doc
+			.environment().searchPaths());
 	}
 
 	@Test
 	public void testSignatureHelp() throws Exception {
-		final JediClient.Query[] asked = { null };
 		final Completion dumps = Completion.builder("dumps").kind(
 			Completion.Kind.METHOD).parameters(Arrays.asList(
 				new Completion.Parameter("obj", null), new Completion.Parameter(
 					"indent", "int"))).build();
-		completer.setJediClient(new JediClient(new JediClient.Backend() {
-
-			@Override
-			public List<Completion> complete(final String key,
-				final JediClient.Query query)
-			{
-				return Collections.emptyList();
-			}
-
-			@Override
-			public String describe(final String key, final JediClient.Query query,
-				final String name)
-			{
-				return null;
-			}
-
-			@Override
-			public org.scijava.code.api.SignatureHelp signatures(final String key,
-				final JediClient.Query query)
-			{
-				asked[0] = query;
-				// NB: Jedi cannot always tell the argument (-1).
-				return new org.scijava.code.api.SignatureHelp(Collections
-					.singletonList(new org.scijava.code.api.SignatureHelp.Signature(
-						dumps, org.scijava.code.api.SignatureHelp.Fit.UNKNOWN)), -1, -1);
-			}
-		}));
+		final FakeLsp fake = fake(q -> Collections.emptyList());
+		fake.signatures = Collections.singletonList(new SignatureHelp.Signature(
+			dumps, SignatureHelp.Fit.UNKNOWN));
 		final String code = "import json\njson.dumps(obj, ";
-		org.scijava.code.api.SignatureHelp help = completer.signatureHelp(
-			new CompletionRequest(code, language, null));
+		SignatureHelp help = completer.signatureHelp(new CompletionRequest(code,
+			language, null));
 		if (help.update() != null) help = help.update().get(5, TimeUnit.SECONDS);
 		assertEquals("dumps", help.signatures().get(0).callable().insertionText());
-		// The argument the caret is in, counted where Jedi cannot tell; and the
-		// call's opening parenthesis.
+		// The argument the caret is in, counted (for when the server cannot
+		// tell); and the call's opening parenthesis.
 		assertEquals(1, help.activeParameter());
 		assertEquals(code.indexOf('('), help.callStart());
-		// Jedi was asked about the caret (shifted by the preamble).
-		assertEquals(3, asked[0].line);
-		assertEquals("json.dumps(obj, ".length(), asked[0].column);
+		// The server was asked about the caret (shifted by the preamble).
+		final Asked asked = last(fake);
+		assertEquals(code.length(), asked.offset);
+		assertEquals(new Position(2, "json.dumps(obj, ".length()), position(
+			asked));
 		// No help outside calls, or in strings.
 		assertTrue(completer.signatureHelp(new CompletionRequest("x = 1",
 			language, null)).isEmpty());
@@ -342,41 +257,54 @@ public class ApposePythonCodeCompleterTest {
 	}
 
 	@Test
-	public void testPrepareWarmsUp() throws Exception {
-		final CountDownLatch asked = new CountDownLatch(1);
-		completer.setJediClient(new JediClient(q -> {
-			asked.countDown();
-			return Collections.emptyList();
-		}));
+	public void testPrepareAndClose() throws Exception {
+		final FakeLsp fake = fake(q -> Collections.emptyList());
 		completer.prepare(new CompletionRequest("import numpy\n", language,
 			null));
-		assertTrue(asked.await(5, TimeUnit.SECONDS));
+		assertEquals(1, fake.asked.size());
+		assertEquals("untitled:/script.py", fake.asked.get(0).uri);
+		completer.closed(new CompletionRequest("import numpy\n", language, null));
+		assertEquals(Collections.singletonList("untitled:/script.py"),
+			fake.closed);
 	}
 
 	@Test
-	public void testJediQuery() {
-		final JediClient.Query[] query = { null };
-		completer.setJediClient(new JediClient(q -> {
-			query[0] = q;
-			return Collections.emptyList();
-		}));
+	public void testServerQuery() {
+		final FakeLsp fake = fake(q -> Collections.emptyList());
 		final String code = "#@ net.imglib2.img.Img image\n#@ double sigma\n" +
 			"image.sha";
 		complete(code);
-		// The script's parameters are typed in a preamble, so Jedi knows them.
-		assertTrue(query[0].source.startsWith(
+		final Asked asked = last(fake);
+		// The script's parameters are typed in a preamble, so the server knows
+		// them.
+		assertTrue(asked.doc.text().startsWith(
 			"import appose.python_worker; import numpy; image: numpy.ndarray; " +
 				"sigma: float; task: appose.python_worker.Task\n"));
 		// The caret is after the word's first character, shifted by the preamble.
-		assertEquals(4, query[0].line);
-		assertEquals("image.s".length(), query[0].column);
-		// No script environment has been built: Jedi uses its own interpreter.
-		assertNull(query[0].python);
+		assertEquals(new Position(3, "image.s".length()), position(asked));
+		// No script environment has been built: the server uses its own Python.
+		assertNull(asked.doc.environment().interpreter());
+	}
+
+	@Test
+	public void testServerOptions() {
+		final JediLanguageServerSpec spec = new JediLanguageServerSpec(() -> null,
+			new java.io.File("workspace"), new java.io.File("server.log"));
+		assertEquals("python", spec.languageId());
+		assertEquals("{workspace={environmentPath=/env/bin/python, " +
+			"extraPaths=[/overlay]}, diagnostics={enable=false}}", String.valueOf(
+				spec.initializationOptions(new EnvironmentContext("/env/bin/python",
+					Collections.singletonList("/overlay"), null))));
+		// Without a script environment: the server's own.
+		assertEquals("{workspace={extraPaths=[]}, diagnostics={enable=false}}",
+			String.valueOf(spec.initializationOptions(EnvironmentContext.EMPTY)));
+		assertTrue(spec.rootUri(EnvironmentContext.EMPTY).startsWith("file:"));
+		new java.io.File("workspace").delete();
 	}
 
 	@Test
 	public void testScriptWorkersUntouched() {
-		noJedi();
+		noServer();
 		// Completing in a script declaring an environment must not create (or
 		// replace) a worker for it, even as its metadata is edited.
 		final String script = "# /// script\n# dependencies = [\"appose\"]\n" +
@@ -464,16 +392,16 @@ public class ApposePythonCodeCompleterTest {
 			java.nio.file.Files.createDirectories(python.getParent());
 			java.nio.file.Files.createFile(python);
 
-			final JediClient.Query[] query = { null };
-			completer.setJediClient(new JediClient(q -> {
-				query[0] = q;
-				return Collections.emptyList();
-			}));
+			final FakeLsp fake = fake(q -> Collections.emptyList());
 			final String code = header + "numpy.ze";
 			service.complete(new CompletionRequest(code, code.length(), language,
 				null, null, script.getPath()));
-			// Jedi analyzes against the environment's Python...
-			assertEquals(python.toFile().getAbsolutePath(), query[0].python);
+			// The server analyzes against the environment's Python...
+			final Asked asked = last(fake);
+			assertEquals(python.toFile().getAbsolutePath(), asked.doc.environment()
+				.interpreter());
+			// ...of the saved script, by its file...
+			assertEquals(script.toURI().toString(), asked.uri);
 			// ...without anything built or started.
 			assertTrue(context.service(ResidentWorkerService.class).workers()
 				.isEmpty());
@@ -487,47 +415,13 @@ public class ApposePythonCodeCompleterTest {
 
 	@Test
 	public void testPythonTypes() {
-		assertEquals("numpy.ndarray", DIALECT.runtimeType(
-			Img.class));
+		assertEquals("numpy.ndarray", DIALECT.runtimeType(Img.class));
 		assertEquals("float", DIALECT.runtimeType(double.class));
 		assertEquals("int", DIALECT.runtimeType(Long.class));
 		assertEquals("str", DIALECT.runtimeType(String.class));
 		assertEquals("bool", DIALECT.runtimeType(boolean.class));
 		assertEquals("list", DIALECT.runtimeType(int[].class));
 		assertNull(DIALECT.runtimeType(Context.class));
-	}
-
-	@Test
-	public void testJediOutputConversion() {
-		final Map<String, Object> sig1 = new HashMap<>();
-		sig1.put("params", Arrays.asList(Arrays.asList("shape", "_ShapeLike"),
-			Arrays.asList("dtype", null)));
-		sig1.put("returns", "NDArray[float64]");
-		final Map<String, Object> sig2 = new HashMap<>();
-		sig2.put("params", Collections.singletonList(Arrays.asList("shape",
-			null)));
-		sig2.put("returns", null);
-		final Map<String, Object> zeros = new LinkedHashMap<>();
-		zeros.put("name", "zeros");
-		zeros.put("type", "function");
-		zeros.put("description", "def zeros");
-		zeros.put("docstring", "zeros(shape) -> a < b");
-		zeros.put("signatures", Arrays.asList(sig1, sig2));
-		final Map<String, Object> shape = new LinkedHashMap<>();
-		shape.put("name", "shape");
-		shape.put("type", "property");
-		shape.put("signatures", Collections.emptyList());
-		final List<Completion> out = ApposePythonCodeCompleter.toCompletions(
-			Arrays.asList(zeros, shape));
-		// One completion per overload.
-		assertEquals(3, out.size());
-		assertEquals(Completion.Kind.METHOD, out.get(0).kind());
-		assertEquals("_ShapeLike", out.get(0).parameters().get(0).type());
-		assertEquals("NDArray[float64]", out.get(0).returnType());
-		assertEquals(1, out.get(1).parameters().size());
-		assertTrue(out.get(0).description().contains("a &lt; b"));
-		assertEquals(Completion.Kind.FIELD, out.get(2).kind());
-		assertFalse(out.get(2).isCallable());
 	}
 
 	// -- Helper methods --
@@ -569,9 +463,32 @@ public class ApposePythonCodeCompleterTest {
 		};
 	}
 
-	/** Uses a Jedi that never answers in time. */
-	private void noJedi() {
-		completer.setJediClient(new JediClient(q -> null));
+	/** Uses a server that never answers. */
+	private void noServer() {
+		completer.setLspClient(new FakeLsp(null));
+	}
+
+	/** Uses a server answering via {@code answers}, asynchronously. */
+	private FakeLsp fake(final Function<Asked, List<Completion>> answers) {
+		final FakeLsp fake = new FakeLsp(answers);
+		completer.setLspClient(fake);
+		return fake;
+	}
+
+	private static Asked last(final FakeLsp fake) {
+		return fake.asked.get(fake.asked.size() - 1);
+	}
+
+	/** Where in the server's document a question was asked. */
+	private static Position position(final Asked asked) {
+		final String text = asked.doc.text();
+		final int at = asked.doc.map().toTransformed(asked.offset);
+		final int lineStart = text.lastIndexOf('\n', at - 1) + 1;
+		int line = 0;
+		for (int i = 0; i < lineStart; i++) {
+			if (text.charAt(i) == '\n') line++;
+		}
+		return new Position(line, at - lineStart);
 	}
 
 	private List<Completion> completions(final String code) {
@@ -582,5 +499,67 @@ public class ApposePythonCodeCompleterTest {
 	private List<String> complete(final String code) {
 		return completions(code).stream().map(Completion::insertionText).collect(
 			Collectors.toList());
+	}
+
+	/** A question asked of the language server. */
+	private static final class Asked {
+
+		private final ScriptDocument doc;
+		private final String uri;
+		private final int offset, resolve;
+
+		private Asked(final ScriptDocument doc, final String uri,
+			final int offset, final int resolve)
+		{
+			this.doc = doc;
+			this.uri = uri;
+			this.offset = offset;
+			this.resolve = resolve;
+		}
+	}
+
+	/** A language server client answering from a function. */
+	private static final class FakeLsp extends LspClient {
+
+		private final Function<Asked, List<Completion>> answers;
+		private final List<Asked> asked = new java.util.concurrent.CopyOnWriteArrayList<>();
+		private final List<String> closed = new ArrayList<>();
+		private List<SignatureHelp.Signature> signatures = Collections.emptyList();
+
+		private FakeLsp(final Function<Asked, List<Completion>> answers) {
+			super(null);
+			this.answers = answers;
+		}
+
+		@Override
+		public CompletableFuture<List<Completion>> complete(
+			final ScriptDocument doc, final String uri, final int offset,
+			final int resolve)
+		{
+			final Asked q = new Asked(doc, uri, offset, resolve);
+			asked.add(q);
+			if (answers == null) return new CompletableFuture<>();
+			return CompletableFuture.supplyAsync(() -> answers.apply(q));
+		}
+
+		@Override
+		public CompletableFuture<SignatureHelp> signatureHelp(
+			final ScriptDocument doc, final String uri, final int offset,
+			final int callStart, final int active)
+		{
+			asked.add(new Asked(doc, uri, offset, 0));
+			return CompletableFuture.completedFuture(new SignatureHelp(signatures,
+				active, callStart));
+		}
+
+		@Override
+		public void prepare(final ScriptDocument doc, final String uri) {
+			asked.add(new Asked(doc, uri, doc.original().length(), 0));
+		}
+
+		@Override
+		public void close(final String uri) {
+			closed.add(uri);
+		}
 	}
 }
