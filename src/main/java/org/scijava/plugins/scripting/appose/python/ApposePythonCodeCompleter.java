@@ -69,8 +69,8 @@ import org.scijava.code.api.SignatureHelp;
 import org.scijava.code.api.Signatures;
 import org.scijava.code.lsp.LspClient;
 import org.scijava.code.lsp.LspServers;
-import org.scijava.log.LogService;
-import org.scijava.log.StderrLogService;
+import org.scijava.code.lsp.LspService;
+import org.scijava.code.lsp.PythonLspClient;
 import org.scijava.plugin.Plugin;
 import org.scijava.plugins.scripting.appose.python._internal.InlineMetadata;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorker;
@@ -78,7 +78,6 @@ import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerServi
 import org.scijava.plugins.scripting.appose.python.completion.ApposePythonDialect;
 import org.scijava.plugins.scripting.appose.python.completion.DependencyOverlays;
 import org.scijava.plugins.scripting.appose.python.completion.JediLanguageServerSpec;
-import org.scijava.plugins.scripting.appose.python.completion.PythonLspClient;
 import org.scijava.plugins.scripting.appose.python.completion.PythonSyntax;
 import org.scijava.plugins.scripting.appose.python.completion.PythonSyntax.Kind;
 import org.scijava.script.ScriptLanguage;
@@ -124,14 +123,6 @@ public class ApposePythonCodeCompleter extends AbstractCodeCompleterPlugin {
 	/** How many completions get signatures, once a word is begun. */
 	private static final int SIGNATURES = 30;
 
-	/** How long a language server may go unused before it stops, in ms. */
-	private static final long SERVER_IDLE = 10 * 60 * 1000;
-
-	/**
-	 * How many language servers may run at once (one per script environment
-	 * and overlay).
-	 */
-	private static final int MAX_SERVERS = 3;
 
 	/** Python executables of script environments, by script and metadata. */
 	private final Map<String, String> pythons = new LinkedHashMap<String, String>(
@@ -609,17 +600,29 @@ public class ApposePythonCodeCompleter extends AbstractCodeCompleterPlugin {
 		return null;
 	}
 
-	/** Gets the language server client, creating it on first use. */
+	/**
+	 * Gets the language server client, creating it on first use; for the
+	 * Python servers of the context (see {@link ApposePythonLspServerPlugin}).
+	 */
 	private synchronized LspClient lspClient() {
 		if (lsp != null) return lsp;
-		final ResidentWorkerService workers = service(
-			ResidentWorkerService.class);
-		if (workers == null) return null;
-		LogService log = service(LogService.class);
-		if (log == null) log = new StderrLogService();
+		final LspService service = service(LspService.class);
+		final LspServers servers = service == null ? null : service.servers(
+			"python");
+		if (servers == null) return null;
+		lsp = new PythonLspClient(servers);
+		return lsp;
+	}
+
+	/**
+	 * How to start jedi-language-server: with the Python of the tooling
+	 * environment, built first if needed (but starting no worker).
+	 */
+	static JediLanguageServerSpec serverSpec(
+		final ResidentWorkerService workers)
+	{
 		final File envs = new File(Environments.apposeEnvsDir());
-		final JediLanguageServerSpec spec = new JediLanguageServerSpec(() -> {
-			// NB: Builds the tooling environment, if needed (but starts no worker).
+		return new JediLanguageServerSpec(() -> {
 			final String python = pythonExecutable(toolingWorker(workers)
 				.environment().get());
 			if (python == null) throw new IOException("No Python in " +
@@ -627,9 +630,6 @@ public class ApposePythonCodeCompleter extends AbstractCodeCompleterPlugin {
 			return python;
 		}, new File(envs, TOOLING_ENV + "-workspace"), new File(envs, TOOLING_ENV +
 			"-server.log"));
-		lsp = new PythonLspClient(new LspServers(spec, log, SERVER_IDLE,
-			MAX_SERVERS));
-		return lsp;
 	}
 
 	/** Gets the tooling environment's worker, building it first if needed. */

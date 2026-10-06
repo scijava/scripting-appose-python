@@ -27,49 +27,34 @@
  * #L%
  */
 
-package org.scijava.plugins.scripting.appose.python.completion;
+package org.scijava.plugins.scripting.appose.python;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
-
-import org.junit.Test;
-import org.scijava.code.api.Completion;
+import org.scijava.code.lsp.LspServerPlugin;
+import org.scijava.code.lsp.LspServerSpec;
+import org.scijava.plugin.Parameter;
+import org.scijava.plugin.Plugin;
+import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerService;
 
 /**
- * Tests {@link PythonLspClient}'s reading of signatures.
+ * Offers jedi-language-server, from the completion tooling environment, as
+ * the Python language server: for Python scripts run via Appose, and for any
+ * other completer wanting one (e.g. Jython's).
  *
  * @author Gabriel Selzer
  */
-public class PythonLspClientTest {
+@Plugin(type = LspServerPlugin.class, name = "jedi-language-server")
+public class ApposePythonLspServerPlugin implements LspServerPlugin {
 
-	@Test
-	public void testParse() {
-		Completion c = parse("dumps",
-			"def dumps(obj, *, skipkeys: bool=False, cls=None, **kw) -> str");
-		assertEquals("[obj, bool skipkeys, cls, kw]", String.valueOf(c
-			.parameters()));
-		assertEquals("str", c.returnType());
+	@Parameter
+	private ResidentWorkerService workers;
 
-		// Brackets and strings in annotations and defaults; positional-only.
-		c = parse("zeros", "def zeros(shape: tuple[int, ...], dtype: str=\"f,8\"" +
-			", /, order: Literal['C', 'F']='C') -> NDArray[float64]");
-		assertEquals("[tuple[int, ...] shape, str dtype, " +
-			"Literal['C', 'F'] order]", String.valueOf(c.parameters()));
-		assertEquals("NDArray[float64]", c.returnType());
-
-		// Classes (their constructors), without parameters or return type.
-		c = parse("Path", "class Path()");
-		assertEquals(0, c.parameters().size());
-		assertNull(c.returnType());
-		c = parse("f", "def f(*args)");
-		assertEquals("args", c.parameters().get(0).name());
-
-		// Not a signature.
-		assertNull(PythonLspClient.parse("x", "instance x"));
+	@Override
+	public boolean supports(final String languageId) {
+		return "python".equals(languageId);
 	}
 
-	private static Completion parse(final String name, final String sig) {
-		return PythonLspClient.parse(name, sig).kind(Completion.Kind.METHOD)
-			.build();
+	@Override
+	public LspServerSpec spec() {
+		return ApposePythonCodeCompleter.serverSpec(workers);
 	}
 }
