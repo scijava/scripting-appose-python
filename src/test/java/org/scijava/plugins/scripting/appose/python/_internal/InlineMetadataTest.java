@@ -38,6 +38,7 @@ import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -80,6 +81,15 @@ public class InlineMetadataTest {
 			"", //
 			"[tool.pixi.dependencies]", //
 			"pytorch-gpu = \"*\""), metadata.trim());
+	}
+
+	@Test
+	public void testDependencies() {
+		assertEquals(Arrays.asList("appose>=0.12.0,<0.13", "numpy > 2"),
+			InlineMetadata.dependencies("requires-python = \">=3.12\"\n" +
+				"dependencies = [\"appose>=0.12.0,<0.13\", \"numpy > 2\"]\n"));
+		assertEquals(Collections.emptyList(), InlineMetadata.dependencies(
+			"requires-python = \">=3.12\"\n"));
 	}
 
 	@Test

@@ -134,3 +134,34 @@ memory) it holds, is otherwise released when the application exits.
 Text printed to stdout and stderr appears in the Script Editor's output
 panes. Errors are reported with a Python traceback that refers to the
 script's own line numbers.
+
+## Code completion
+
+The Script Editor completes code in these scripts, in two layers:
+
+* **Instantly, with no Python needed:** names in scope (variables,
+  functions, classes, imports, parameters of the enclosing function), the
+  script's `#@` parameters, `task`, builtins and keywords. This comes from
+  parsing the script with [tree-sitter](https://tree-sitter.github.io/).
+* **With [Jedi](https://jedi.readthedocs.io/):** members of objects and
+  modules, function signatures (with parameter names and types) and
+  documentation. Jedi runs in a small environment of its own
+  (`appose-python-completion`: Python, Jedi and Appose), which is built in
+  the background the first time you complete code, and takes a while only
+  then.
+
+Once a script's environment is built, by running the script (in this session
+or an earlier one), Jedi analyzes the script against it, so that the packages
+installed there are known too. Packages the script declares (in its
+`# /// script` block) but its environment lacks, e.g. a dependency you just
+added, are installed for completion only, into a separate directory, a moment
+after you stop editing the dependencies; so they are known before you run the
+script. This covers PyPI packages; conda packages (`[tool.pixi.dependencies]`)
+and environments declared in files are known once the script has run.
+Completion never builds a script's environment itself, and never disturbs
+its worker. Script parameters are known by the Python types they have at run
+time, e.g. images as NumPy arrays.
+
+Typing never waits for Jedi: if its answer for a word is not ready within a
+moment (the first answer for a package can take a few seconds), the instant
+completions show, and Jedi's are used once ready.

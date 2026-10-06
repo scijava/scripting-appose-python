@@ -109,6 +109,23 @@ public class ResidentWorkerService extends AbstractService implements
 		return worker;
 	}
 
+	/**
+	 * Gets the resident worker for the named environment, if there is one with
+	 * the given configuration. Unlike {@link #worker}, this never creates,
+	 * replaces or releases anything, so it suits callers that must not disturb
+	 * running workers, such as code completion while the user edits the
+	 * environment's configuration.
+	 *
+	 * @return The worker, or null if there is none with that configuration.
+	 */
+	public ResidentWorker find(final String name, final String config) {
+		synchronized (entries) {
+			final Entry entry = entries.get(name);
+			return entry != null && entry.config.equals(config) ? entry.worker
+				: null;
+		}
+	}
+
 	/** Gets the current resident workers. */
 	public List<ResidentWorker> workers() {
 		final List<ResidentWorker> list = new ArrayList<>();

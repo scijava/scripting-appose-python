@@ -37,7 +37,6 @@ import java.io.Reader;
 import java.io.UncheckedIOException;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -58,7 +57,7 @@ import net.imglib2.appose.WrappedNDArray;
 
 import org.apposed.appose.Appose;
 import org.apposed.appose.BuildException;
-import org.apposed.appose.Builder;
+import org.apposed.appose.Environment;
 import org.apposed.appose.NDArray;
 import org.apposed.appose.Service;
 import org.apposed.appose.Service.TaskStatus;
@@ -70,7 +69,6 @@ import org.scijava.log.LogService;
 import org.scijava.log.Logger;
 import org.scijava.module.ModuleItem;
 import org.scijava.plugin.Parameter;
-import org.scijava.plugins.scripting.appose.python._internal.InlineMetadata;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorker;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerService;
 import org.scijava.plugins.scripting.appose.python._internal.SciJavaTasks;
@@ -440,112 +438,33 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 	}
 
 	/**
-	 * Gets the resident worker for the script's Appose environment, which the
-	 * script declares either inline, via a PEP 723 {@code # /// script}
-	 * metadata block, or in a file named by the {@code env} (and optionally
-	 * {@code scheme}) attributes of its {@code #@script} directive. The
-	 * environment itself is built lazily, by the worker's first task.
+	 * Gets the resident worker for the script's Appose environment (see
+	 * {@link ScriptEnvironment}). The environment itself is built lazily, by
+	 * the worker's first task.
 	 */
 	private ResidentWorker worker(final ScriptInfo info, final String script)
 		throws ScriptException
 	{
 		if (info == null) throw noEnvironment();
-		final String envRef = info.get("env");
-		final String metadata;
+		final ScriptEnvironment env;
 		try {
-			metadata = InlineMetadata.extract(script);
+			env = ScriptEnvironment.of(script, info.getPath(), info.get("env"), info
+				.get("scheme"));
 		}
-		catch (final IllegalArgumentException e) {
+		catch (final IllegalArgumentException | IOException e) {
 			throw scriptException(e.getMessage(), e);
 		}
-		if (metadata != null) {
-			if (envRef != null) {
-				throw new ScriptException("The script declares its environment " +
-					"twice: inline, and via #@script(env=\"" + envRef + "\"). " +
-					"Remove one of them.");
-			}
-			return inlineWorker(metadata, info.getPath());
-		}
-		if (envRef == null) throw noEnvironment();
-
-		final File envFile = resolveEnvFile(envRef, info.getPath());
-		if (!envFile.isFile()) {
-			throw new ScriptException("Appose environment file not found: " +
-				envFile.getAbsolutePath());
-		}
-		final String content;
-		try {
-			content = new String(Files.readAllBytes(envFile.toPath()),
-				StandardCharsets.UTF_8);
-		}
-		catch (final IOException e) {
-			throw scriptException("Cannot read Appose environment file: " +
-				envFile.getAbsolutePath(), e);
-		}
-		return worker(envName(envFile), content, info.get("scheme"));
+		if (env == null) throw noEnvironment();
+		return workerService.worker(env.name, env.config(), env::builder,
+			ApposePythonScriptEngine::launch);
 	}
 
-	/** Gets the resident worker for an environment declared inline. */
-	private ResidentWorker inlineWorker(final String metadata,
-		final String scriptPath) throws ScriptException
-	{
-		// Note: Name the environment after the script, as for environment
-		// files, so that editing the metadata updates the environment and
-		// replaces its worker, rather than leaving the old one running.
-		// Unsaved scripts, e.g. new from a template, have no path to go by.
-		final String envName = scriptPath == null ? "script-" + String.format(
-			"%08x", metadata.hashCode()) : envName(new File(scriptPath));
-		final String content;
-		try {
-			content = InlineMetadata.toPyProject(metadata, envName);
-		}
-		catch (final IllegalArgumentException e) {
-			throw scriptException(e.getMessage(), e);
-		}
-		return worker(envName, content, InlineMetadata.SCHEME);
-	}
-
-	/**
-	 * Gets the resident worker for the named environment, built from the given
-	 * configuration.
-	 */
-	private ResidentWorker worker(final String envName, final String content,
-		final String scheme)
-	{
-		return workerService.worker(envName, scheme + "\n" + content, () -> {
-			final Builder<?> builder = Appose.content(content);
-			return scheme == null ? builder : builder.scheme(scheme);
-		},
-			// Note: On Windows, importing numpy from a task hangs unless numpy
-			// was imported during worker initialization.
-			env -> env.python().init(
-				"try:\n    import numpy\nexcept ImportError:\n    pass\n"));
-	}
-
-	/** Resolves an (optionally relative) env file path against the script path. */
-	static File resolveEnvFile(final String envRef, final String scriptPath) {
-		final File envFile = new File(envRef);
-		if (envFile.isAbsolute()) return envFile;
-		if (scriptPath != null) {
-			final File parent = new File(scriptPath).getAbsoluteFile().getParentFile();
-			if (parent != null) return new File(parent, envRef);
-		}
-		return envFile;
-	}
-
-	/**
-	 * Derives a valid Appose environment name from an environment file: its
-	 * base name, plus a hash of its absolute path to avoid collisions between
-	 * like-named files in different directories. E.g.:
-	 * {@code /path/to/cellcast.toml} becomes {@code cellcast-1a2b3c4d}.
-	 */
-	static String envName(final File envFile) {
-		final String fileName = envFile.getName();
-		final int dot = fileName.lastIndexOf('.');
-		final String baseName = dot > 0 ? fileName.substring(0, dot) : fileName;
-		final String path = envFile.getAbsoluteFile().toPath().normalize().toString();
-		return baseName.replaceAll("[^a-zA-Z0-9_-]", "_") + "-" +
-			String.format("%08x", path.hashCode());
+	/** Creates the service of a worker in the given (built) environment. */
+	static Service launch(final Environment env) {
+		// Note: On Windows, importing numpy from a task hangs unless numpy
+		// was imported during worker initialization.
+		return env.python().init(
+			"try:\n    import numpy\nexcept ImportError:\n    pass\n");
 	}
 
 	private static ScriptException noEnvironment() {

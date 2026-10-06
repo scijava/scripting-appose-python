@@ -146,39 +146,39 @@ public class ApposePythonScriptEngineTest {
 	@Test
 	public void testEnvName() {
 		final String name =
-			ApposePythonScriptEngine.envName(new File("/a/b/cellcast.toml"));
+			ScriptEnvironment.envName(new File("/a/b/cellcast.toml"));
 		assertTrue(name, name.matches("cellcast-[0-9a-f]{8}"));
 
 		// Same file via a different path spelling.
 		assertEquals(name,
-			ApposePythonScriptEngine.envName(new File("/a/c/../b/cellcast.toml")));
+			ScriptEnvironment.envName(new File("/a/c/../b/cellcast.toml")));
 
 		// Same file name in a different directory.
 		assertNotEquals(name,
-			ApposePythonScriptEngine.envName(new File("/a/cellcast.toml")));
+			ScriptEnvironment.envName(new File("/a/cellcast.toml")));
 
-		assertTrue(ApposePythonScriptEngine.envName(new File("/x/my env.v2.toml"))
+		assertTrue(ScriptEnvironment.envName(new File("/x/my env.v2.toml"))
 			.matches("my_env_v2-[0-9a-f]{8}"));
-		assertTrue(ApposePythonScriptEngine.envName(new File("/x/requirements"))
+		assertTrue(ScriptEnvironment.envName(new File("/x/requirements"))
 			.matches("requirements-[0-9a-f]{8}"));
 	}
 
 	@Test
 	public void testResolveEnvFile() {
 		final File abs = new File("/some/where/env.toml").getAbsoluteFile();
-		assertEquals(abs, ApposePythonScriptEngine.resolveEnvFile(abs.getPath(),
+		assertEquals(abs, ScriptEnvironment.resolveEnvFile(abs.getPath(),
 			"/other/script.py"));
 
 		final File scriptDir = new File("/scripts").getAbsoluteFile();
-		assertEquals(new File(scriptDir, "env.toml"), ApposePythonScriptEngine
+		assertEquals(new File(scriptDir, "env.toml"), ScriptEnvironment
 			.resolveEnvFile("env.toml", new File(scriptDir, "s.py").getPath()));
 
 		// Relative script path resolves relative to the working directory.
 		assertEquals(new File("sub", "env.toml").getAbsoluteFile(),
-			ApposePythonScriptEngine.resolveEnvFile("env.toml", "sub/s.py")
+			ScriptEnvironment.resolveEnvFile("env.toml", "sub/s.py")
 				.getAbsoluteFile());
 
-		assertEquals(new File("env.toml"), ApposePythonScriptEngine
+		assertEquals(new File("env.toml"), ScriptEnvironment
 			.resolveEnvFile("env.toml", null));
 	}
 
