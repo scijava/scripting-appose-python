@@ -33,6 +33,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -75,6 +76,10 @@ public class ResidentWorkerService extends AbstractService implements
 	/** Environments by name, each with its configuration and worker. */
 	private final Map<String, Entry> entries = new HashMap<>();
 
+	/** Told about every environment's builds. */
+	private final List<BuildListener> buildListeners =
+		new CopyOnWriteArrayList<>();
+
 	/**
 	 * Gets the resident worker for the named environment, creating the
 	 * environment and worker if needed.
@@ -102,11 +107,28 @@ public class ResidentWorkerService extends AbstractService implements
 			final LazyEnvironment env = new LazyEnvironment(name, builder.get());
 			env.addBuildListener(SciJavaTasks.buildListener(taskService,
 				statusService, log));
+			env.addBuildListener(new BuildListener() {
+
+				@Override
+				public void buildFinished(final String envName, final Throwable error) {
+					for (final BuildListener l : buildListeners) {
+						l.buildFinished(envName, error);
+					}
+				}
+			});
 			worker = new ResidentWorker(env, launcher);
 			entries.put(name, new Entry(config, worker));
 		}
 		if (stale != null) stale.release();
 		return worker;
+	}
+
+	/**
+	 * Adds a listener told when any environment's build ends (e.g. so that
+	 * code completion can use it).
+	 */
+	public void addBuildListener(final BuildListener listener) {
+		buildListeners.add(listener);
 	}
 
 	/**

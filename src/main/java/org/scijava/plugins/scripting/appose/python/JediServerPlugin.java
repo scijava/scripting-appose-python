@@ -85,9 +85,13 @@ public class JediServerPlugin implements LanguageServerPlugin {
 
 	@Override
 	public Environment environment(final TextDocumentItem document) {
+		final ApposePythonEnvironments environments = ApposePythonEnvironments.of(
+			workers);
+		// NB: Scripts move as their environments are built, or overlays ready.
+		environments.onChange(servers::environmentsChanged);
 		// NB: On opening the script, its dependencies are settled.
-		return ApposePythonEnvironments.of(workers).environment(document.getText(),
-			document.getUri(), document.getVersion() <= 1);
+		return environments.environment(document.getText(), document.getUri(),
+			document.getVersion() <= 1);
 	}
 
 	@Override
