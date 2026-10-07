@@ -35,7 +35,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.Callable;
 
-import org.scijava.code.api.EnvironmentContext;
+import org.scijava.code.lsp.Environment;
 import org.scijava.code.lsp.LspConnection;
 import org.scijava.code.lsp.LspServerSpec;
 
@@ -96,7 +96,7 @@ public class JediLanguageServerSpec implements LspServerSpec {
 	}
 
 	@Override
-	public LspConnection start(final EnvironmentContext env)
+	public LspConnection start(final Environment env)
 		throws IOException
 	{
 		final String exe;
@@ -120,7 +120,7 @@ public class JediLanguageServerSpec implements LspServerSpec {
 	}
 
 	@Override
-	public Object initializationOptions(final EnvironmentContext env) {
+	public Object initializationOptions(final Environment env) {
 		final Map<String, Object> workspaceOptions = new LinkedHashMap<>();
 		// NB: Without an environment, Jedi uses the server's own Python.
 		if (env.interpreter() != null) {
@@ -139,7 +139,7 @@ public class JediLanguageServerSpec implements LspServerSpec {
 	}
 
 	@Override
-	public String rootUri(final EnvironmentContext env) {
+	public String rootUri(final Environment env) {
 		// NB: jedi-language-server applies its workspace options only with a
 		// root. An empty one, so that nothing irrelevant gets indexed.
 		workspace.mkdirs();

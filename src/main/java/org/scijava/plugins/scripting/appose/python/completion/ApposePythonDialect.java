@@ -41,7 +41,7 @@ import java.util.Map;
 import net.imglib2.RandomAccessibleInterval;
 
 import org.apposed.appose.NDArray;
-import org.scijava.code.api.ScriptDialect;
+import org.scijava.code.lsp.ScriptDialect;
 
 /**
  * How Python scripts run via Appose see their script parameters: as the

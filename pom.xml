@@ -95,7 +95,7 @@
 		<!-- TEMP: for Task#log(); drop once propagated to pom-scijava. -->
 		<scijava-common.version>2.101.0</scijava-common.version>
 
-		<scijava-code-api.version>0.1.0-SNAPSHOT</scijava-code-api.version>
+		<scijava-code-lsp.version>0.1.0-SNAPSHOT</scijava-code-lsp.version>
 		<tree-sitter.version>0.26.6</tree-sitter.version>
 		<tree-sitter-python.version>0.25.0</tree-sitter-python.version>
 	</properties>
@@ -112,13 +112,8 @@
 		</dependency>
 		<dependency>
 			<groupId>org.scijava</groupId>
-			<artifactId>scijava-code-api</artifactId>
-			<version>${scijava-code-api.version}</version>
-		</dependency>
-		<dependency>
-			<groupId>org.scijava</groupId>
 			<artifactId>scijava-code-lsp</artifactId>
-			<version>${scijava-code-api.version}</version>
+			<version>${scijava-code-lsp.version}</version>
 		</dependency>
 
 		<!-- Third-party dependencies -->
