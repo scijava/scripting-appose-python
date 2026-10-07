@@ -39,20 +39,33 @@ import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+import org.eclipse.lsp4j.CompletionItem;
+import org.eclipse.lsp4j.CompletionList;
+import org.eclipse.lsp4j.CompletionParams;
+import org.eclipse.lsp4j.Diagnostic;
+import org.eclipse.lsp4j.DidChangeTextDocumentParams;
+import org.eclipse.lsp4j.DidOpenTextDocumentParams;
+import org.eclipse.lsp4j.Hover;
+import org.eclipse.lsp4j.HoverParams;
+import org.eclipse.lsp4j.SignatureHelp;
+import org.eclipse.lsp4j.SignatureHelpParams;
+import org.eclipse.lsp4j.TextDocumentContentChangeEvent;
+import org.eclipse.lsp4j.TextDocumentIdentifier;
+import org.eclipse.lsp4j.TextDocumentItem;
+import org.eclipse.lsp4j.VersionedTextDocumentIdentifier;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.scijava.Context;
-import org.scijava.code.api.CodeCompletionService;
-import org.scijava.code.api.Completion;
-import org.scijava.code.api.CompletionRequest;
-import org.scijava.code.api.CompletionResult;
-import org.scijava.code.api.Diagnostic;
-import org.scijava.code.api.Hover;
-import org.scijava.code.api.SignatureHelp;
+import org.scijava.code.lsp.LanguageServerService;
+import org.scijava.code.lsp.LspClient;
+import org.scijava.code.lsp.MergedLanguageServer;
+import org.scijava.code.lsp.UpdatingCompletionList;
 import org.scijava.module.ModuleService;
 import org.scijava.script.ScriptInfo;
 import org.scijava.script.ScriptLanguage;
@@ -60,8 +73,9 @@ import org.scijava.script.ScriptModule;
 import org.scijava.script.ScriptService;
 
 /**
- * End-to-end tests of {@link ApposePythonCodeCompleter} with a real language
- * server (jedi-language-server).
+ * End-to-end tests of the language servers of Python scripts run via Appose
+ * (see {@link JediServerPlugin}), with a real jedi-language-server, through
+ * the {@link LanguageServerService}, as editors use it.
  * <p>
  * The first completion builds the completion tooling environment (Python and
  * jedi-language-server, via pixi), and a script run builds the small uv
@@ -81,7 +95,7 @@ public class ApposePythonCompletionIntegrationTest {
 
 	private static Context context;
 	private static ScriptLanguage language;
-	private static CodeCompletionService service;
+	private static MergedLanguageServer server;
 	private static File scriptDir;
 
 	@BeforeClass
@@ -89,7 +103,7 @@ public class ApposePythonCompletionIntegrationTest {
 		context = new Context();
 		language = context.service(ScriptService.class).getLanguageByName(
 			"appose-python");
-		service = context.service(CodeCompletionService.class);
+		server = context.service(LanguageServerService.class).server(language);
 		scriptDir = new File(ApposePythonCompletionIntegrationTest.class
 			.getResource("/appose-test/requirements.txt").toURI()).getParentFile();
 	}
@@ -103,13 +117,15 @@ public class ApposePythonCompletionIntegrationTest {
 	public void testStandardLibrary() throws Exception {
 		// Before any script environment is built, the server knows the standard
 		// library, with signatures and documentation.
-		final List<Completion> completions = completeUntil(
+		final List<CompletionItem> completions = completeUntil(
 			"import json\njson.du", null, "dumps");
-		final Completion dumps = completions.stream().filter(c -> c
-			.insertionText().equals("dumps")).findFirst().get();
-		assertTrue(dumps.isCallable());
-		assertFalse(dumps.parameters().isEmpty());
-		assertTrue(dumps.description() != null);
+		final CompletionItem dumps = completions.stream().filter(c -> c.getLabel()
+			.equals("dumps") && c.getLabelDetails() != null).findFirst().get();
+		assertTrue(dumps.getLabelDetails().getDetail(), dumps.getLabelDetails()
+			.getDetail().startsWith("(Any obj, bool skipkeys"));
+		assertTrue(dumps.getDocumentation() != null || server
+			.resolveCompletionItem(dumps).get(1, TimeUnit.MINUTES)
+			.getDocumentation() != null);
 		report("import json\njson.l", null, "loads", "o");
 	}
 
@@ -127,8 +143,8 @@ public class ApposePythonCompletionIntegrationTest {
 		moduleService.run(module, false, Collections.singletonMap("image",
 			null)).get();
 
-		// Now the server analyzes the script against its environment: numpy is known,
-		// and so is the type of the image parameter.
+		// Now the server analyzes the script against its environment: numpy is
+		// known, and so is the type of the image parameter.
 		completeUntil(header + "np.ze", script.getPath(), "zeros");
 		completeUntil(header + "image.sha", script.getPath(), "shape");
 		report(header + "np.random.r", script.getPath(), "randn", "a");
@@ -137,57 +153,57 @@ public class ApposePythonCompletionIntegrationTest {
 	@Test
 	public void testSignatureHelp() throws Exception {
 		final String code = "import json\njson.dumps(obj, ";
+		final String uri = sync(code, null);
 		final long deadline = System.currentTimeMillis() + BUILD_TIMEOUT;
-		SignatureHelp help = SignatureHelp.NONE;
-		while (help.isEmpty() && System.currentTimeMillis() < deadline) {
-			help = completer().signatureHelp(new CompletionRequest(code, language,
-				null));
-			if (help.update() != null) {
-				final SignatureHelp better = help.update().get(1, TimeUnit.MINUTES);
-				if (better != null) help = better;
-			}
+		SignatureHelp help = null;
+		while (help == null && System.currentTimeMillis() < deadline) {
+			help = server.signatureHelp(new SignatureHelpParams(
+				new TextDocumentIdentifier(uri), LspClient.position(code, code
+					.length()))).get(1, TimeUnit.MINUTES);
 		}
-		assertEquals("dumps", help.signatures().get(0).callable().insertionText());
-		assertFalse(help.signatures().get(0).callable().parameters().isEmpty());
-		assertEquals(1, help.activeParameter());
-		assertEquals(code.indexOf('('), help.callStart());
+		assertTrue(help.getSignatures().get(0).getLabel().contains("dumps("));
+		assertFalse(help.getSignatures().get(0).getParameters().isEmpty());
+		assertEquals(Integer.valueOf(1), help.getActiveParameter());
 	}
 
 	@Test
 	public void testHover() throws Exception {
 		final String code = "import json\njson.dumps(1)";
-		final CompletionRequest request = new CompletionRequest(code, code
-			.indexOf("dumps") + 2, language, null, null, null);
+		final String uri = sync(code, null);
 		final long deadline = System.currentTimeMillis() + BUILD_TIMEOUT;
-		Hover hover = Hover.NONE;
-		while (hover.isEmpty() && System.currentTimeMillis() < deadline) {
-			hover = completer().hover(request);
-			if (hover.update() != null) {
-				final Hover better = hover.update().get(1, TimeUnit.MINUTES);
-				if (better != null) hover = better;
-			}
+		Hover hover = null;
+		while (hover == null && System.currentTimeMillis() < deadline) {
+			hover = server.hover(new HoverParams(new TextDocumentIdentifier(uri),
+				LspClient.position(code, code.indexOf("dumps") + 2))).get(1,
+					TimeUnit.MINUTES);
 		}
-		assertTrue(hover.text(), hover.text().contains("JSON"));
-		assertEquals(code.indexOf("dumps"), hover.start());
-		assertEquals(code.indexOf("dumps") + "dumps".length(), hover.end());
+		assertTrue(String.valueOf(hover), hover.getContents().getRight().getValue()
+			.contains("JSON"));
+		// The word's range, in the script.
+		assertEquals(LspClient.position(code, code.indexOf("dumps")), hover
+			.getRange().getStart());
+		assertEquals(LspClient.position(code, code.indexOf("dumps") + 5), hover
+			.getRange().getEnd());
 	}
 
 	@Test
 	public void testDiagnostics() throws Exception {
 		// A syntax error, on the script's third line.
 		final String code = "#@ double sigma\nx = sigma\ny = (1 +\n";
+		final LanguageServerService servers = context.service(
+			LanguageServerService.class);
 		final long deadline = System.currentTimeMillis() + BUILD_TIMEOUT;
 		List<Diagnostic> problems = Collections.emptyList();
 		while (problems.isEmpty() && System.currentTimeMillis() < deadline) {
-			problems = completer().diagnose(new CompletionRequest(code, language,
-				null)).get(2, TimeUnit.MINUTES);
+			problems = servers.diagnose(language, "untitled:/diagnose.py", code,
+				120_000);
 		}
 		assertFalse(problems.isEmpty());
-		assertTrue(problems.toString(), problems.get(0).start() >= code.indexOf(
-			"y = "));
+		assertTrue(problems.toString(), problems.get(0).getRange().getStart()
+			.getLine() >= 2);
 		// Fixed: no more problems.
-		assertTrue(completer().diagnose(new CompletionRequest(code.replace("(1 +",
-			"(1 + 2)"), language, null)).get(1, TimeUnit.MINUTES).isEmpty());
+		assertTrue(servers.diagnose(language, "untitled:/diagnose.py", code
+			.replace("(1 +", "(1 + 2)"), 120_000).isEmpty());
 	}
 
 	@Test
@@ -203,16 +219,16 @@ public class ApposePythonCompletionIntegrationTest {
 		// The server, once its parent (this JVM) is gone, must exit: here, its
 		// parent is a process that already has.
 		completeUntil("import json\njson.du", null, "dumps");
-		final String python = ApposePythonCodeCompleter.pythonOnDisk(new File(
+		final String python = ApposePythonEnvironments.pythonOnDisk(new File(
 			org.apposed.appose.util.Environments.apposeEnvsDir(),
-			ApposePythonCodeCompleter.TOOLING_ENV));
+			ApposePythonEnvironments.TOOLING_ENV));
 		final Process gone = new ProcessBuilder(python, "-c", "pass").start();
 		gone.waitFor();
-		final Process server = new ProcessBuilder(python, "-c",
+		final Process process = new ProcessBuilder(python, "-c",
 			org.scijava.plugins.scripting.appose.python.completion.JediLanguageServerSpec.LAUNCHER,
 			String.valueOf(gone.pid())).redirectErrorStream(true).start();
-		final boolean exited = server.waitFor(30, TimeUnit.SECONDS);
-		if (!exited) server.destroyForcibly();
+		final boolean exited = process.waitFor(30, TimeUnit.SECONDS);
+		if (!exited) process.destroyForcibly();
 		assertTrue(exited);
 	}
 
@@ -227,68 +243,97 @@ public class ApposePythonCompletionIntegrationTest {
 			StandardCharsets.UTF_8));
 		// Opening it prepares completion, including the dependency's overlay.
 		final String code = header + "tifffile.imr";
-		completer().prepare(new CompletionRequest(code, code.length(), language,
-			null, null, script.getPath()));
+		sync(code, script.getPath());
 		completeUntil(code, script.getPath(), "imread");
 	}
 
 	// -- Helper methods --
 
-	private static ApposePythonCodeCompleter completer() {
-		return (ApposePythonCodeCompleter) service.getCompleterPlugin(language);
+	/** The open documents' versions, by URI. */
+	private static final Map<String, Integer> versions = new HashMap<>();
+
+	/** Opens a script on the server, or changes it; returns its URI. */
+	private static String sync(final String code, final String path) {
+		final String uri = path == null ? "untitled:/integration.py" : new File(
+			path).toURI().toString();
+		final Integer version = versions.get(uri);
+		if (version == null) {
+			versions.put(uri, 1);
+			server.didOpen(new DidOpenTextDocumentParams(new TextDocumentItem(uri,
+				"appose-python", 1, code)));
+		}
+		else {
+			versions.put(uri, version + 1);
+			server.didChange(new DidChangeTextDocumentParams(
+				new VersionedTextDocumentIdentifier(uri, version + 1), Collections
+					.singletonList(new TextDocumentContentChangeEvent(code))));
+		}
+		return uri;
 	}
 
 	/** Completes until the expected completion appears (environments build). */
-	private static List<Completion> completeUntil(final String code,
-		final String path, final String expected)
+	private static List<CompletionItem> completeUntil(final String code,
+		final String path, final String expected) throws Exception
 	{
 		final long deadline = System.currentTimeMillis() + BUILD_TIMEOUT;
 		while (System.currentTimeMillis() < deadline) {
-			final List<Completion> completions = complete(code, path);
-			if (completions.stream().anyMatch(c -> c.insertionText().equals(
-				expected))) return completions;
-			try {
-				Thread.sleep(1000);
+			final List<CompletionItem> completions = complete(code, path, true);
+			if (completions.stream().anyMatch(c -> c.getLabel().equals(expected))) {
+				return completions;
 			}
-			catch (final InterruptedException exc) {
-				throw new RuntimeException(exc);
-			}
+			Thread.sleep(1000);
 		}
 		fail("No '" + expected + "' completion for: " + code);
 		return null;
 	}
 
-	private static List<Completion> complete(final String code,
-		final String path)
+	/**
+	 * Completes at the end of the code.
+	 *
+	 * @param settled Whether to wait for the slower servers' completions.
+	 */
+	private static List<CompletionItem> complete(final String code,
+		final String path, final boolean settled) throws Exception
 	{
-		return service.complete(new CompletionRequest(code, code.length(),
-			language, null, null, path)).completions();
+		final String uri = sync(code, path);
+		CompletionList list = server.completion(new CompletionParams(
+			new TextDocumentIdentifier(uri), LspClient.position(code, code.length())))
+			.get(1, TimeUnit.MINUTES).getRight();
+		if (settled && list instanceof UpdatingCompletionList) {
+			final CompletionList better = ((UpdatingCompletionList) list).update()
+				.get(1, TimeUnit.MINUTES);
+			if (better != null) list = better;
+		}
+		return list.getItems();
 	}
 
 	/**
 	 * Prints how long completions take, once warm: for another keystroke of a
-	 * word the server has answered (cached); and for a new word, how long the editor
-	 * waits (barely: it answers at once), and how long until the server's completions
-	 * arrive as an update.
+	 * word the server has answered (cached); and for a new word, how long the
+	 * editor waits (barely: it answers at once), and how long until the
+	 * server's completions arrive as an update.
 	 */
 	private static void report(final String code, final String path,
 		final String expected, final String more) throws Exception
 	{
 		completeUntil(code, path, expected);
 		long t0 = System.nanoTime();
-		final int n = complete(code + more, path).size();
+		final int n = complete(code + more, path, true).size();
 		final long cached = System.nanoTime() - t0;
 		final String other = code.substring(0, code.lastIndexOf('.') + 1) + "s";
+		final String uri = sync(other, path);
 		t0 = System.nanoTime();
-		final CompletionResult result = service.complete(new CompletionRequest(
-			other, other.length(), language, null, null, path));
+		final CompletionList first = server.completion(new CompletionParams(
+			new TextDocumentIdentifier(uri), LspClient.position(other, other
+				.length()))).get(1, TimeUnit.MINUTES).getRight();
 		final long wait = System.nanoTime() - t0;
-		final CompletionResult update = result.update() == null ? result : result
-			.update().get(1, TimeUnit.MINUTES);
+		final CompletionList update = first instanceof UpdatingCompletionList
+			? ((UpdatingCompletionList) first).update().get(1, TimeUnit.MINUTES)
+			: first;
 		final long arrived = System.nanoTime() - t0;
 		System.out.println("[completion timing] same word (cached): " + cached /
 			1000000 + " ms, " + n + " completions; new word: editor waits " + wait /
-				1000000 + " ms, the server's " + update.completions().size() +
+				1000000 + " ms, all servers' " + update.getItems().size() +
 			" completions after " + arrived / 1000000 + " ms");
 	}
 }
