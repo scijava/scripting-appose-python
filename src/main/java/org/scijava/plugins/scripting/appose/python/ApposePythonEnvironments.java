@@ -49,6 +49,7 @@ import org.apposed.appose.Service;
 import org.apposed.appose.util.Environments;
 import org.scijava.plugins.scripting.appose.python._internal.InlineMetadata;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorker;
+import org.scijava.plugins.scripting.appose.python._internal.BuildListener;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerService;
 import org.scijava.plugins.scripting.appose.python.completion.DependencyOverlays;
 import org.scijava.plugins.scripting.appose.python.completion.JediLanguageServerSpec;
@@ -98,8 +99,19 @@ final class ApposePythonEnvironments {
 
 	private DependencyOverlays overlays;
 
+	/** Told when where scripts run may have changed. */
+	private volatile Runnable onChange = () -> {};
+
 	private ApposePythonEnvironments(final ResidentWorkerService workers) {
 		this.workers = workers;
+		// NB: A script run builds its environment: its Python is known then.
+		if (workers != null) workers.addBuildListener(new BuildListener() {
+
+			@Override
+			public void buildFinished(final String envName, final Throwable error) {
+				if (error == null) changed();
+			}
+		});
 	}
 
 	/** Gets those of a context (by its resident worker service). */
@@ -127,9 +139,22 @@ final class ApposePythonEnvironments {
 			: Collections.singletonList(overlay), null, null);
 	}
 
+	/**
+	 * Sets what to do when where scripts run may have changed without them
+	 * changing: when an environment is built, or an overlay is ready.
+	 */
+	void onChange(final Runnable onChange) {
+		this.onChange = onChange == null ? () -> {} : onChange;
+	}
+
+	private void changed() {
+		onChange.run();
+	}
+
 	/** Sets the dependency overlays, e.g. to use fake ones in tests. */
 	synchronized void setOverlays(final DependencyOverlays overlays) {
 		this.overlays = overlays;
+		if (overlays != null) overlays.setOnReady(this::changed);
 	}
 
 	/** The file path of a {@code file:} URI, or null. */
@@ -181,6 +206,7 @@ final class ApposePythonEnvironments {
 			dir) -> installOverlay(workers, python, dependencies, dir), new File(
 				Environments.apposeEnvsDir(), TOOLING_ENV + "-overlays"),
 			OVERLAY_SETTLE, System::currentTimeMillis);
+		overlays.setOnReady(this::changed);
 		return overlays;
 	}
 

@@ -43,9 +43,6 @@ import java.util.stream.Collectors;
 import net.imglib2.img.Img;
 
 import org.eclipse.lsp4j.CompletionItem;
-import org.eclipse.lsp4j.CompletionParams;
-import org.eclipse.lsp4j.DidOpenTextDocumentParams;
-import org.eclipse.lsp4j.TextDocumentIdentifier;
 import org.eclipse.lsp4j.TextDocumentItem;
 import org.junit.After;
 import org.junit.Before;
@@ -54,7 +51,7 @@ import org.scijava.Context;
 import org.scijava.code.lsp.LanguageServerService;
 import org.scijava.code.lsp.Environment;
 import org.scijava.code.lsp.LanguageServerPlugin;
-import org.scijava.code.lsp.Positions;
+import org.scijava.code.lsp.ScriptSession;
 import org.scijava.plugin.PluginService;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerService;
 import org.scijava.plugins.scripting.appose.python.completion.ApposePythonDialect;
@@ -307,15 +304,13 @@ public class ApposePythonServersTest {
 
 	/** Completes with the syntax-only server. */
 	private List<String> complete(final String code) {
-		final PythonSyntaxLanguageServer server = new PythonSyntaxLanguageServer(
-			context.service(LanguageServerService.class));
-		server.didOpen(new DidOpenTextDocumentParams(new TextDocumentItem(
-			"untitled:/a.py", "appose-python", 1, code)));
-		try {
-			return server.completion(new CompletionParams(new TextDocumentIdentifier(
-				"untitled:/a.py"), Positions.position(code, code.length()))).get(10,
-					TimeUnit.SECONDS).getRight().getItems().stream().map(
-						CompletionItem::getLabel).collect(Collectors.toList());
+		try (ScriptSession session = ScriptSession.owning(
+			new PythonSyntaxLanguageServer(context.service(
+				LanguageServerService.class)), language))
+		{
+			return session.completion(code, code.length()).get(10,
+				TimeUnit.SECONDS).getItems().stream().map(CompletionItem::getLabel)
+				.collect(Collectors.toList());
 		}
 		catch (final Exception exc) {
 			throw new RuntimeException(exc);

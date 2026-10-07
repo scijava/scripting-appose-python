@@ -106,6 +106,9 @@ public final class DependencyOverlays {
 	/** The dependencies last seen for each environment, and since when. */
 	private final Map<String, Seen> seen = new HashMap<>();
 
+	/** Told when an overlay is ready. */
+	private volatile Runnable onReady = () -> {};
+
 	/**
 	 * @param installer Does the installing, on a background thread.
 	 * @param root Directory holding the overlays (one per environment).
@@ -120,6 +123,14 @@ public final class DependencyOverlays {
 		this.root = root;
 		this.settleMillis = settleMillis;
 		this.clock = clock;
+	}
+
+	/**
+	 * Sets what to do when an overlay becomes ready (on the installing
+	 * thread), e.g. tell language servers to look again.
+	 */
+	public void setOnReady(final Runnable onReady) {
+		this.onReady = onReady == null ? () -> {} : onReady;
 	}
 
 	/**
@@ -154,8 +165,13 @@ public final class DependencyOverlays {
 			}
 			else if (!settled && now - last.since < settleMillis) return null;
 			final File overlay = new File(root, envName);
-			installs.put(key, CompletableFuture.supplyAsync(() -> installer.install(
-				python, dependencies, overlay), executor));
+			final CompletableFuture<String> started = CompletableFuture.supplyAsync(
+				() -> installer.install(python, dependencies, overlay), executor);
+			installs.put(key, started);
+			// NB: Once done, so that asking again gets the overlay.
+			started.thenAccept(dir -> {
+				if (dir != null) onReady.run();
+			});
 			return null;
 		}
 	}

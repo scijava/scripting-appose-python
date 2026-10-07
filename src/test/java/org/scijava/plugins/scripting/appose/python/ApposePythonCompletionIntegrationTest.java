@@ -46,25 +46,16 @@ import java.util.concurrent.TimeUnit;
 
 import org.eclipse.lsp4j.CompletionItem;
 import org.eclipse.lsp4j.CompletionList;
-import org.eclipse.lsp4j.CompletionParams;
 import org.eclipse.lsp4j.Diagnostic;
-import org.eclipse.lsp4j.DidChangeTextDocumentParams;
-import org.eclipse.lsp4j.DidOpenTextDocumentParams;
 import org.eclipse.lsp4j.Hover;
-import org.eclipse.lsp4j.HoverParams;
 import org.eclipse.lsp4j.SignatureHelp;
-import org.eclipse.lsp4j.SignatureHelpParams;
-import org.eclipse.lsp4j.TextDocumentContentChangeEvent;
-import org.eclipse.lsp4j.TextDocumentIdentifier;
-import org.eclipse.lsp4j.TextDocumentItem;
-import org.eclipse.lsp4j.VersionedTextDocumentIdentifier;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.scijava.Context;
 import org.scijava.code.lsp.LanguageServerService;
 import org.scijava.code.lsp.Positions;
-import org.scijava.code.lsp.MergedLanguageServer;
+import org.scijava.code.lsp.ScriptSession;
 import org.scijava.code.lsp.UpdatingCompletionList;
 import org.scijava.module.ModuleService;
 import org.scijava.script.ScriptInfo;
@@ -95,7 +86,7 @@ public class ApposePythonCompletionIntegrationTest {
 
 	private static Context context;
 	private static ScriptLanguage language;
-	private static MergedLanguageServer server;
+	private static LanguageServerService servers;
 	private static File scriptDir;
 
 	@BeforeClass
@@ -103,13 +94,14 @@ public class ApposePythonCompletionIntegrationTest {
 		context = new Context();
 		language = context.service(ScriptService.class).getLanguageByName(
 			"appose-python");
-		server = context.service(LanguageServerService.class).server(language);
+		servers = context.service(LanguageServerService.class);
 		scriptDir = new File(ApposePythonCompletionIntegrationTest.class
 			.getResource("/appose-test/requirements.txt").toURI()).getParentFile();
 	}
 
 	@AfterClass
 	public static void tearDown() {
+		sessions.values().forEach(ScriptSession::close);
 		if (context != null) context.dispose();
 	}
 
@@ -123,8 +115,8 @@ public class ApposePythonCompletionIntegrationTest {
 			.equals("dumps") && c.getLabelDetails() != null).findFirst().get();
 		assertTrue(dumps.getLabelDetails().getDetail(), dumps.getLabelDetails()
 			.getDetail().startsWith("(Any obj, bool skipkeys"));
-		assertTrue(dumps.getDocumentation() != null || server
-			.resolveCompletionItem(dumps).get(1, TimeUnit.MINUTES)
+		assertTrue(dumps.getDocumentation() != null || session(null).resolve(
+			dumps).get(1, TimeUnit.MINUTES)
 			.getDocumentation() != null);
 		report("import json\njson.l", null, "loads", "o");
 	}
@@ -153,13 +145,12 @@ public class ApposePythonCompletionIntegrationTest {
 	@Test
 	public void testSignatureHelp() throws Exception {
 		final String code = "import json\njson.dumps(obj, ";
-		final String uri = sync(code, null);
+		final ScriptSession session = session(null);
 		final long deadline = System.currentTimeMillis() + BUILD_TIMEOUT;
 		SignatureHelp help = null;
 		while (help == null && System.currentTimeMillis() < deadline) {
-			help = server.signatureHelp(new SignatureHelpParams(
-				new TextDocumentIdentifier(uri), Positions.position(code, code
-					.length()))).get(1, TimeUnit.MINUTES);
+			help = session.signatureHelp(code, code.length()).get(1,
+				TimeUnit.MINUTES);
 		}
 		assertTrue(help.getSignatures().get(0).getLabel().contains("dumps("));
 		assertFalse(help.getSignatures().get(0).getParameters().isEmpty());
@@ -169,13 +160,12 @@ public class ApposePythonCompletionIntegrationTest {
 	@Test
 	public void testHover() throws Exception {
 		final String code = "import json\njson.dumps(1)";
-		final String uri = sync(code, null);
+		final ScriptSession session = session(null);
 		final long deadline = System.currentTimeMillis() + BUILD_TIMEOUT;
 		Hover hover = null;
 		while (hover == null && System.currentTimeMillis() < deadline) {
-			hover = server.hover(new HoverParams(new TextDocumentIdentifier(uri),
-				Positions.position(code, code.indexOf("dumps") + 2))).get(1,
-					TimeUnit.MINUTES);
+			hover = session.hover(code, code.indexOf("dumps") + 2).get(1,
+				TimeUnit.MINUTES);
 		}
 		assertTrue(String.valueOf(hover), hover.getContents().getRight().getValue()
 			.contains("JSON"));
@@ -190,19 +180,17 @@ public class ApposePythonCompletionIntegrationTest {
 	public void testDiagnostics() throws Exception {
 		// A syntax error, on the script's third line.
 		final String code = "#@ double sigma\nx = sigma\ny = (1 +\n";
-		final LanguageServerService servers = context.service(
-			LanguageServerService.class);
 		final long deadline = System.currentTimeMillis() + BUILD_TIMEOUT;
 		List<Diagnostic> problems = Collections.emptyList();
 		while (problems.isEmpty() && System.currentTimeMillis() < deadline) {
-			problems = servers.diagnose(language, "untitled:/diagnose.py", code,
+			problems = servers.diagnose(language, code,
 				120_000);
 		}
 		assertFalse(problems.isEmpty());
 		assertTrue(problems.toString(), problems.get(0).getRange().getStart()
 			.getLine() >= 2);
 		// Fixed: no more problems.
-		assertTrue(servers.diagnose(language, "untitled:/diagnose.py", code
+		assertTrue(servers.diagnose(language, code
 			.replace("(1 +", "(1 + 2)"), 120_000).isEmpty());
 	}
 
@@ -249,26 +237,18 @@ public class ApposePythonCompletionIntegrationTest {
 
 	// -- Helper methods --
 
-	/** The open documents' versions, by URI. */
-	private static final Map<String, Integer> versions = new HashMap<>();
+	/** The scripts' sessions, by path ("" for an untitled one). */
+	private static final Map<String, ScriptSession> sessions = new HashMap<>();
 
-	/** Opens a script on the server, or changes it; returns its URI. */
-	private static String sync(final String code, final String path) {
-		final String uri = path == null ? "untitled:/integration.py" : new File(
-			path).toURI().toString();
-		final Integer version = versions.get(uri);
-		if (version == null) {
-			versions.put(uri, 1);
-			server.didOpen(new DidOpenTextDocumentParams(new TextDocumentItem(uri,
-				"appose-python", 1, code)));
-		}
-		else {
-			versions.put(uri, version + 1);
-			server.didChange(new DidChangeTextDocumentParams(
-				new VersionedTextDocumentIdentifier(uri, version + 1), Collections
-					.singletonList(new TextDocumentContentChangeEvent(code))));
-		}
-		return uri;
+	/** The session about a script (null path: untitled). */
+	private static ScriptSession session(final String path) {
+		return sessions.computeIfAbsent(path == null ? "" : path, p -> servers
+			.session(language).setFile(path == null ? null : new File(path)));
+	}
+
+	/** Tells the servers a script's text. */
+	private static ScriptSession sync(final String code, final String path) {
+		return session(path).update(code);
 	}
 
 	/** Completes until the expected completion appears (environments build). */
@@ -295,10 +275,8 @@ public class ApposePythonCompletionIntegrationTest {
 	private static List<CompletionItem> complete(final String code,
 		final String path, final boolean settled) throws Exception
 	{
-		final String uri = sync(code, path);
-		CompletionList list = server.completion(new CompletionParams(
-			new TextDocumentIdentifier(uri), Positions.position(code, code.length())))
-			.get(1, TimeUnit.MINUTES).getRight();
+		CompletionList list = session(path).completion(code, code.length())
+			.get(1, TimeUnit.MINUTES);
 		if (settled && list instanceof UpdatingCompletionList) {
 			final CompletionList better = ((UpdatingCompletionList) list).update()
 				.get(1, TimeUnit.MINUTES);
@@ -321,11 +299,10 @@ public class ApposePythonCompletionIntegrationTest {
 		final int n = complete(code + more, path, true).size();
 		final long cached = System.nanoTime() - t0;
 		final String other = code.substring(0, code.lastIndexOf('.') + 1) + "s";
-		final String uri = sync(other, path);
+		final ScriptSession session = session(path);
 		t0 = System.nanoTime();
-		final CompletionList first = server.completion(new CompletionParams(
-			new TextDocumentIdentifier(uri), Positions.position(other, other
-				.length()))).get(1, TimeUnit.MINUTES).getRight();
+		final CompletionList first = session.completion(other, other.length())
+			.get(1, TimeUnit.MINUTES);
 		final long wait = System.nanoTime() - t0;
 		final CompletionList update = first instanceof UpdatingCompletionList
 			? ((UpdatingCompletionList) first).update().get(1, TimeUnit.MINUTES)
