@@ -63,7 +63,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import org.scijava.Context;
 import org.scijava.code.lsp.LanguageServerService;
-import org.scijava.code.lsp.LspClient;
+import org.scijava.code.lsp.Positions;
 import org.scijava.code.lsp.MergedLanguageServer;
 import org.scijava.code.lsp.UpdatingCompletionList;
 import org.scijava.module.ModuleService;
@@ -158,7 +158,7 @@ public class ApposePythonCompletionIntegrationTest {
 		SignatureHelp help = null;
 		while (help == null && System.currentTimeMillis() < deadline) {
 			help = server.signatureHelp(new SignatureHelpParams(
-				new TextDocumentIdentifier(uri), LspClient.position(code, code
+				new TextDocumentIdentifier(uri), Positions.position(code, code
 					.length()))).get(1, TimeUnit.MINUTES);
 		}
 		assertTrue(help.getSignatures().get(0).getLabel().contains("dumps("));
@@ -174,15 +174,15 @@ public class ApposePythonCompletionIntegrationTest {
 		Hover hover = null;
 		while (hover == null && System.currentTimeMillis() < deadline) {
 			hover = server.hover(new HoverParams(new TextDocumentIdentifier(uri),
-				LspClient.position(code, code.indexOf("dumps") + 2))).get(1,
+				Positions.position(code, code.indexOf("dumps") + 2))).get(1,
 					TimeUnit.MINUTES);
 		}
 		assertTrue(String.valueOf(hover), hover.getContents().getRight().getValue()
 			.contains("JSON"));
 		// The word's range, in the script.
-		assertEquals(LspClient.position(code, code.indexOf("dumps")), hover
+		assertEquals(Positions.position(code, code.indexOf("dumps")), hover
 			.getRange().getStart());
-		assertEquals(LspClient.position(code, code.indexOf("dumps") + 5), hover
+		assertEquals(Positions.position(code, code.indexOf("dumps") + 5), hover
 			.getRange().getEnd());
 	}
 
@@ -297,7 +297,7 @@ public class ApposePythonCompletionIntegrationTest {
 	{
 		final String uri = sync(code, path);
 		CompletionList list = server.completion(new CompletionParams(
-			new TextDocumentIdentifier(uri), LspClient.position(code, code.length())))
+			new TextDocumentIdentifier(uri), Positions.position(code, code.length())))
 			.get(1, TimeUnit.MINUTES).getRight();
 		if (settled && list instanceof UpdatingCompletionList) {
 			final CompletionList better = ((UpdatingCompletionList) list).update()
@@ -324,7 +324,7 @@ public class ApposePythonCompletionIntegrationTest {
 		final String uri = sync(other, path);
 		t0 = System.nanoTime();
 		final CompletionList first = server.completion(new CompletionParams(
-			new TextDocumentIdentifier(uri), LspClient.position(other, other
+			new TextDocumentIdentifier(uri), Positions.position(other, other
 				.length()))).get(1, TimeUnit.MINUTES).getRight();
 		final long wait = System.nanoTime() - t0;
 		final CompletionList update = first instanceof UpdatingCompletionList

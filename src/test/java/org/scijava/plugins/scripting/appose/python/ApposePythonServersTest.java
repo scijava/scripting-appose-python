@@ -51,11 +51,10 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.scijava.Context;
-import org.scijava.code.api.CodeCompletionService;
+import org.scijava.code.lsp.LanguageServerService;
 import org.scijava.code.lsp.Environment;
 import org.scijava.code.lsp.LanguageServerPlugin;
-import org.scijava.code.lsp.LanguageServerService;
-import org.scijava.code.lsp.LspClient;
+import org.scijava.code.lsp.Positions;
 import org.scijava.plugin.PluginService;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerService;
 import org.scijava.plugins.scripting.appose.python.completion.ApposePythonDialect;
@@ -83,7 +82,7 @@ public class ApposePythonServersTest {
 
 	@Before
 	public void setUp() {
-		context = new Context(ScriptService.class, CodeCompletionService.class,
+		context = new Context(ScriptService.class, LanguageServerService.class,
 			ResidentWorkerService.class, LanguageServerService.class);
 		language = context.service(ScriptService.class).getLanguageByName(
 			"appose-python");
@@ -293,13 +292,13 @@ public class ApposePythonServersTest {
 			"didChange=true, didSave=false}";
 		assertEquals("{workspace={environmentPath=/env/bin/python, " +
 			"extraPaths=[/overlay]}, " + diagnostics + "}", String.valueOf(spec
-				.initializationOptions(new org.scijava.code.api.EnvironmentContext(
-					"/env/bin/python", Collections.singletonList("/overlay"), null))));
+				.initializationOptions(new Environment(
+					"/env/bin/python", Collections.singletonList("/overlay"), null, null))));
 		// Without a script environment: the server's own.
 		assertEquals("{workspace={extraPaths=[]}, " + diagnostics + "}", String
 			.valueOf(spec.initializationOptions(
-				org.scijava.code.api.EnvironmentContext.EMPTY)));
-		assertTrue(spec.rootUri(org.scijava.code.api.EnvironmentContext.EMPTY)
+				Environment.NONE)));
+		assertTrue(spec.rootUri(Environment.NONE)
 			.startsWith("file:"));
 		new File("workspace").delete();
 	}
@@ -309,12 +308,12 @@ public class ApposePythonServersTest {
 	/** Completes with the syntax-only server. */
 	private List<String> complete(final String code) {
 		final PythonSyntaxLanguageServer server = new PythonSyntaxLanguageServer(
-			context.service(CodeCompletionService.class));
+			context.service(LanguageServerService.class));
 		server.didOpen(new DidOpenTextDocumentParams(new TextDocumentItem(
 			"untitled:/a.py", "appose-python", 1, code)));
 		try {
 			return server.completion(new CompletionParams(new TextDocumentIdentifier(
-				"untitled:/a.py"), LspClient.position(code, code.length()))).get(10,
+				"untitled:/a.py"), Positions.position(code, code.length()))).get(10,
 					TimeUnit.SECONDS).getRight().getItems().stream().map(
 						CompletionItem::getLabel).collect(Collectors.toList());
 		}

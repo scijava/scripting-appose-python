@@ -35,11 +35,10 @@ import java.util.Map;
 import org.eclipse.lsp4j.TextDocumentItem;
 import org.eclipse.lsp4j.services.LanguageServer;
 import org.scijava.Priority;
-import org.scijava.code.api.CodeCompletionService;
-import org.scijava.code.api.ScriptDocument;
+import org.scijava.code.lsp.LanguageServerService;
+import org.scijava.code.lsp.ScriptDocument;
 import org.scijava.code.lsp.Environment;
 import org.scijava.code.lsp.LanguageServerPlugin;
-import org.scijava.code.lsp.LanguageServerService;
 import org.scijava.code.lsp.PythonCompletionServer;
 import org.scijava.code.lsp.TransformingLanguageServer;
 import org.scijava.plugin.Parameter;
@@ -77,8 +76,6 @@ public class JediServerPlugin implements LanguageServerPlugin {
 	@Parameter
 	private ResidentWorkerService workers;
 
-	@Parameter(required = false)
-	private CodeCompletionService completion;
 
 	@Override
 	public boolean supports(final ScriptLanguage language) {
@@ -102,9 +99,9 @@ public class JediServerPlugin implements LanguageServerPlugin {
 
 	/** The script as plain Python, for the server. */
 	ScriptDocument document(final String text, final Environment environment) {
-		final Map<String, Class<?>> params = completion == null ? Collections
-			.emptyMap() : completion.scriptParameters(text);
+		final Map<String, Class<?>> params = servers == null ? Collections
+			.emptyMap() : servers.scriptParameters(text);
 		return ScriptDocument.of(text, params, PythonSyntaxLanguageServer.DIALECT,
-			environment.toContext());
+			environment);
 	}
 }

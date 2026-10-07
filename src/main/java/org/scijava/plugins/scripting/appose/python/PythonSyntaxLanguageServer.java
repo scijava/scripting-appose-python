@@ -39,7 +39,7 @@ import java.util.Map;
 import org.eclipse.lsp4j.CompletionItem;
 import org.eclipse.lsp4j.CompletionItemKind;
 import org.eclipse.lsp4j.CompletionList;
-import org.scijava.code.api.CodeCompletionService;
+import org.scijava.code.lsp.LanguageServerService;
 import org.scijava.code.lsp.ScriptLanguageServer;
 import org.scijava.plugins.scripting.appose.python.completion.ApposePythonDialect;
 import org.scijava.plugins.scripting.appose.python.completion.PythonSyntax;
@@ -59,12 +59,12 @@ public class PythonSyntaxLanguageServer extends ScriptLanguageServer {
 
 	static final ApposePythonDialect DIALECT = new ApposePythonDialect();
 
-	private final CodeCompletionService completion;
+	private final LanguageServerService servers;
 
-	/** @param completion Reads the scripts' parameters. */
-	public PythonSyntaxLanguageServer(final CodeCompletionService completion) {
+	/** @param servers Reads the scripts' parameters. */
+	public PythonSyntaxLanguageServer(final LanguageServerService servers) {
 		super(null);
-		this.completion = completion;
+		this.servers = servers;
 	}
 
 	@Override
@@ -85,8 +85,8 @@ public class PythonSyntaxLanguageServer extends ScriptLanguageServer {
 	 */
 	private Map<String, String> parameters(final String text) {
 		final Map<String, String> params = new LinkedHashMap<>();
-		if (completion == null) return params;
-		completion.scriptParameters(text).forEach((name, type) -> params.put(name,
+		if (servers == null) return params;
+		servers.scriptParameters(text).forEach((name, type) -> params.put(name,
 			DIALECT.runtimeType(type)));
 		return params;
 	}
