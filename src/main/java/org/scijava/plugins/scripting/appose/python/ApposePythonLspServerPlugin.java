@@ -55,6 +55,6 @@ public class ApposePythonLspServerPlugin implements LspServerPlugin {
 
 	@Override
 	public LspServerSpec spec() {
-		return ApposePythonCodeCompleter.serverSpec(workers);
+		return ApposePythonEnvironments.serverSpec(workers);
 	}
 }
