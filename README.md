@@ -137,18 +137,20 @@ script's own line numbers.
 
 ## Code completion
 
-The Script Editor completes code in these scripts with two language servers,
-which `scijava-code-lsp`'s `LanguageServerService` merges into one (so any
-other LSP client of it gets the same):
+The Script Editor completes code in these scripts with one language server
+(`ApposePythonLanguageServer`, offered to `scijava-code-lsp`'s
+`LanguageServerService` by `ApposePythonServerPlugin`, so any other LSP client
+of it gets the same), combining two sources: jedi's answers first, then the
+syntax-only ones for names jedi has not completed.
 
 * **Instantly, with no Python needed:** names in scope (variables,
   functions, classes, imports, parameters of the enclosing function), the
   script's `#@` parameters, `task`, builtins and keywords. This comes from
   parsing the script with [tree-sitter](https://tree-sitter.github.io/)
-  (`PythonSyntaxServerPlugin`).
+  (`PythonSyntaxLanguageServer`).
 * **With a language server,
   [jedi-language-server](https://github.com/pappasam/jedi-language-server)
-  (built on [Jedi](https://jedi.readthedocs.io/)), via `JediServerPlugin`:**
+  (built on [Jedi](https://jedi.readthedocs.io/)):**
   members of objects and modules, function signatures (with parameter names
   and types), documentation, hover and syntax errors. The server runs in a small environment of its own
   (`appose-python-completion`: Python, jedi-language-server, Appose and uv),

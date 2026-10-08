@@ -49,7 +49,7 @@ import org.scijava.plugins.scripting.appose.python._internal.InlineMetadata;
  * directive.
  * <p>
  * Both running a script ({@link ApposePythonScriptEngine}) and completing code
- * in it ({@link JediServerPlugin}) resolve its environment here, so
+ * in it ({@link ApposePythonServerPlugin}) resolve its environment here, so
  * that they agree on the environment's name and configuration.
  * </p>
  */

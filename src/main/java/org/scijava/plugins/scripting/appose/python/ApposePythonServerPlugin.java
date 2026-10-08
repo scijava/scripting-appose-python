@@ -47,15 +47,17 @@ import org.scijava.plugins.scripting.appose.python.completion.PythonCompletionSe
 import org.scijava.script.ScriptLanguage;
 
 /**
- * Offers jedi-language-server (see {@link ApposePythonLspServerPlugin}) for
- * Python scripts run via Appose: members of objects and modules, signatures,
- * documentation, hover and syntax errors. Once a script's environment is built
- * (by running the script), the server analyzes the script against it, so its
- * packages are known; packages the script declares but its environment lacks
- * are installed for completion only (see
+ * Offers the language server of Python scripts run via Appose (see
+ * {@link ApposePythonLanguageServer}): the syntax-only server, and, if offered
+ * (see {@link ApposePythonLspServerPlugin}), jedi-language-server: members of
+ * objects and modules, signatures, documentation, hover and syntax errors.
+ * Once a script's environment is built (by running the script), jedi
+ * analyzes the script against it, so its packages are known; packages the
+ * script declares but its environment lacks are installed for completion only
+ * (see
  * {@link org.scijava.plugins.scripting.appose.python.completion.DependencyOverlays}).
- * The server sees the script as plain Python, its parameters declared with
- * the types they have when it runs (e.g. images as NumPy arrays).
+ * Jedi sees the script as plain Python, its parameters declared with the
+ * types they have when it runs (e.g. images as NumPy arrays).
  * <p>
  * Completion never builds a script's environment, and never disturbs its
  * worker.
@@ -63,9 +65,9 @@ import org.scijava.script.ScriptLanguage;
  *
  * @author Gabriel Selzer
  */
-@Plugin(type = LanguageServerPlugin.class, name = "jedi-language-server",
+@Plugin(type = LanguageServerPlugin.class, name = "appose-python",
 	priority = Priority.HIGH)
-public class JediServerPlugin implements LanguageServerPlugin {
+public class ApposePythonServerPlugin implements LanguageServerPlugin {
 
 	/** How many completions get signatures, once a word is begun. */
 	private static final int SIGNATURES = 30;
@@ -76,32 +78,42 @@ public class JediServerPlugin implements LanguageServerPlugin {
 	@Parameter
 	private ResidentWorkerService workers;
 
-
 	@Override
 	public boolean supports(final ScriptLanguage language) {
-		return language instanceof ApposePythonScriptLanguage && servers.launch(
-			"python", Environment.NONE) != null;
-	}
-
-	@Override
-	public Environment environment(final TextDocumentItem document) {
-		final ApposePythonEnvironments environments = ApposePythonEnvironments.of(
-			workers);
-		// NB: Scripts move as their environments are built, or overlays ready.
-		environments.onChange(servers::environmentsChanged);
-		// NB: On opening the script, its dependencies are settled.
-		return environments.environment(document.getText(), document.getUri(),
-			document.getVersion() <= 1);
+		return language instanceof ApposePythonScriptLanguage;
 	}
 
 	@Override
 	public LanguageServer create(final Environment environment) {
+		final boolean jedi = jediOffered();
+		return new ApposePythonLanguageServer(new PythonSyntaxLanguageServer(
+			servers), this::environment, jedi ? this::jedi : null,
+			ApposePythonEnvironments.of(workers));
+	}
+
+	/** Whether jedi-language-server is offered. */
+	boolean jediOffered() {
+		return servers.launch("python", Environment.NONE) != null;
+	}
+
+	/**
+	 * Gets where a script runs, for jedi: its environment's Python (once built),
+	 * and an overlay of the packages it declares but its environment lacks.
+	 * On opening the script, its dependencies are settled.
+	 */
+	Environment environment(final TextDocumentItem document) {
+		return ApposePythonEnvironments.of(workers).environment(document
+			.getText(), document.getUri(), document.getVersion() <= 1);
+	}
+
+	/** Makes a jedi for scripts running in an environment. */
+	private LanguageServer jedi(final Environment environment) {
 		return new PythonCompletionServer(new TransformingLanguageServer(servers
 			.launch("python", environment), text -> document(text, environment)),
 			SIGNATURES);
 	}
 
-	/** The script as plain Python, for the server. */
+	/** The script as plain Python, for jedi. */
 	ScriptDocument document(final String text, final Environment environment) {
 		final Map<String, Class<?>> params = servers == null ? Collections
 			.emptyMap() : servers.scriptParameters(text);

@@ -64,7 +64,7 @@ import org.scijava.script.ScriptService;
 
 /**
  * End-to-end tests of the language servers of Python scripts run via Appose
- * (see {@link JediServerPlugin}), with a real jedi-language-server, through
+ * (see {@link ApposePythonServerPlugin}), with a real jedi-language-server, through
  * the {@link LanguageServerService}, as editors use it.
  * <p>
  * The first completion builds the completion tooling environment (Python and
