@@ -63,7 +63,7 @@ import org.scijava.script.ScriptService;
 /**
  * Tests the language servers of Python scripts run via Appose, without
  * starting any server process: the syntax-only server
- * ({@link PythonSyntaxLanguageServer}), and what {@link JediServerPlugin}
+ * ({@link PythonSyntaxLanguageServer}), and what {@link ApposePythonServerPlugin}
  * tells jedi-language-server (the script as plain Python, and where it runs).
  *
  * @author Gabriel Selzer
@@ -74,7 +74,7 @@ public class ApposePythonServersTest {
 
 	private Context context;
 	private ScriptLanguage language;
-	private JediServerPlugin jedi;
+	private ApposePythonServerPlugin plugin;
 	private ApposePythonEnvironments environments;
 
 	@Before
@@ -83,9 +83,10 @@ public class ApposePythonServersTest {
 			ResidentWorkerService.class, LanguageServerService.class);
 		language = context.service(ScriptService.class).getLanguageByName(
 			"appose-python");
-		jedi = context.service(PluginService.class).createInstancesOfType(
+		plugin = context.service(PluginService.class).createInstancesOfType(
 			LanguageServerPlugin.class).stream().filter(
-				p -> p instanceof JediServerPlugin).map(p -> (JediServerPlugin) p)
+				p -> p instanceof ApposePythonServerPlugin).map(
+				p -> (ApposePythonServerPlugin) p)
 			.findFirst().get();
 		environments = ApposePythonEnvironments.of(context.service(
 			ResidentWorkerService.class));
@@ -101,7 +102,7 @@ public class ApposePythonServersTest {
 		assertTrue(context.service(LanguageServerService.class).supports(
 			language));
 		// NB: Here, appose-python offers the Python server itself.
-		assertTrue(jedi.supports(language));
+		assertTrue(plugin.jediOffered());
 	}
 
 	@Test
@@ -125,7 +126,7 @@ public class ApposePythonServersTest {
 			"image.sha";
 		// The script's parameters are typed in a preamble, so the server knows
 		// them.
-		assertTrue(jedi.document(code, Environment.NONE).text().startsWith(
+		assertTrue(plugin.document(code, Environment.NONE).text().startsWith(
 			"import appose.python_worker; import numpy; image: numpy.ndarray; " +
 				"sigma: float; task: appose.python_worker.Task\n"));
 	}
@@ -133,7 +134,7 @@ public class ApposePythonServersTest {
 	@Test
 	public void testEnvironmentWithoutOne() {
 		// No script environment has been built: the server's own Python.
-		final Environment env = jedi.environment(new TextDocumentItem(
+		final Environment env = plugin.environment(new TextDocumentItem(
 			"untitled:/a.py", "appose-python", 2, "import os\nos.pa"));
 		assertNull(env.interpreter());
 		assertTrue(env.searchPaths().isEmpty());
@@ -154,12 +155,12 @@ public class ApposePythonServersTest {
 			"appose-python", 1, code);
 		// On opening the script, its dependencies are settled: the overlay is
 		// installed; once ready, the server searches it.
-		jedi.environment(doc);
+		plugin.environment(doc);
 		for (int i = 0; i < 100 && installed.isEmpty(); i++) Thread.sleep(20);
 		Thread.sleep(50);
 		assertEquals(Collections.singletonList(Collections.singletonList(
 			"tifffile")), installed);
-		assertEquals(Collections.singletonList("/overlays/blur"), jedi.environment(
+		assertEquals(Collections.singletonList("/overlays/blur"), plugin.environment(
 			doc).searchPaths());
 	}
 
@@ -169,9 +170,9 @@ public class ApposePythonServersTest {
 		// it, even as its metadata is edited.
 		final String script = "# /// script\n# dependencies = [\"appose\"]\n" +
 			"# ///\nimport os\nos.pa";
-		jedi.environment(new TextDocumentItem("untitled:/a.py", "appose-python", 2,
+		plugin.environment(new TextDocumentItem("untitled:/a.py", "appose-python", 2,
 			script));
-		jedi.environment(new TextDocumentItem("untitled:/a.py", "appose-python", 3,
+		plugin.environment(new TextDocumentItem("untitled:/a.py", "appose-python", 3,
 			script.replace("appose", "appose, numpy")));
 		assertTrue(context.service(ResidentWorkerService.class).workers()
 			.isEmpty());
@@ -196,7 +197,7 @@ public class ApposePythonServersTest {
 			java.nio.file.Files.createDirectories(python.getParent());
 			java.nio.file.Files.createFile(python);
 
-			final Environment env = jedi.environment(new TextDocumentItem(script
+			final Environment env = plugin.environment(new TextDocumentItem(script
 				.toURI().toString(), "appose-python", 2, header + "numpy.ze"));
 			// The server analyzes against the environment's Python...
 			assertEquals(python.toFile().getAbsolutePath(), env.interpreter());

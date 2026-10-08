@@ -51,7 +51,7 @@ import org.scijava.plugins.scripting.appose.python.completion.PythonSyntax.Kind;
  * needed, names in scope, the script's parameters, {@code task}, builtins and
  * keywords; and, after a dot, the names used after dots elsewhere in the
  * script. (A Python language server, e.g. jedi-language-server, knows more;
- * see {@link JediServerPlugin}.)
+ * see {@link ApposePythonLanguageServer}.)
  *
  * @author Gabriel Selzer
  */

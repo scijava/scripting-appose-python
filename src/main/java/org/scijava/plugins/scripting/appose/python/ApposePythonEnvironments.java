@@ -42,6 +42,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import org.apposed.appose.Appose;
 import org.apposed.appose.Environment;
@@ -100,7 +101,7 @@ final class ApposePythonEnvironments {
 	private DependencyOverlays overlays;
 
 	/** Told when where scripts run may have changed. */
-	private volatile Runnable onChange = () -> {};
+	private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
 
 	private ApposePythonEnvironments(final ResidentWorkerService workers) {
 		this.workers = workers;
@@ -140,15 +141,19 @@ final class ApposePythonEnvironments {
 	}
 
 	/**
-	 * Sets what to do when where scripts run may have changed without them
+	 * Adds what to do when where scripts run may have changed without them
 	 * changing: when an environment is built, or an overlay is ready.
 	 */
-	void onChange(final Runnable onChange) {
-		this.onChange = onChange == null ? () -> {} : onChange;
+	void addListener(final Runnable listener) {
+		listeners.add(listener);
+	}
+
+	void removeListener(final Runnable listener) {
+		listeners.remove(listener);
 	}
 
 	private void changed() {
-		onChange.run();
+		for (final Runnable listener : listeners) listener.run();
 	}
 
 	/** Sets the dependency overlays, e.g. to use fake ones in tests. */
