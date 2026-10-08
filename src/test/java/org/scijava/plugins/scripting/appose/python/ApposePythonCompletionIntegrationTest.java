@@ -56,7 +56,6 @@ import org.scijava.Context;
 import org.scijava.code.lsp.LanguageServerService;
 import org.scijava.code.lsp.Positions;
 import org.scijava.code.lsp.ScriptSession;
-import org.scijava.code.lsp.UpdatingCompletionList;
 import org.scijava.module.ModuleService;
 import org.scijava.script.ScriptInfo;
 import org.scijava.script.ScriptLanguage;
@@ -257,7 +256,7 @@ public class ApposePythonCompletionIntegrationTest {
 	{
 		final long deadline = System.currentTimeMillis() + BUILD_TIMEOUT;
 		while (System.currentTimeMillis() < deadline) {
-			final List<CompletionItem> completions = complete(code, path, true);
+			final List<CompletionItem> completions = complete(code, path);
 			if (completions.stream().anyMatch(c -> c.getLabel().equals(expected))) {
 				return completions;
 			}
@@ -267,50 +266,33 @@ public class ApposePythonCompletionIntegrationTest {
 		return null;
 	}
 
-	/**
-	 * Completes at the end of the code.
-	 *
-	 * @param settled Whether to wait for the slower servers' completions.
-	 */
+	/** Completes at the end of the code: all servers' completions. */
 	private static List<CompletionItem> complete(final String code,
-		final String path, final boolean settled) throws Exception
+		final String path) throws Exception
 	{
-		CompletionList list = session(path).completion(code, code.length())
-			.get(1, TimeUnit.MINUTES);
-		if (settled && list instanceof UpdatingCompletionList) {
-			final CompletionList better = ((UpdatingCompletionList) list).update()
-				.get(1, TimeUnit.MINUTES);
-			if (better != null) list = better;
-		}
-		return list.getItems();
+		return session(path).completion(code, code.length()).get(1,
+			TimeUnit.MINUTES).getItems();
 	}
 
 	/**
 	 * Prints how long completions take, once warm: for another keystroke of a
-	 * word the server has answered (cached); and for a new word, how long the
-	 * editor waits (barely: it answers at once), and how long until the
-	 * server's completions arrive as an update.
+	 * word the server has answered (cached); and for a new word.
 	 */
 	private static void report(final String code, final String path,
 		final String expected, final String more) throws Exception
 	{
 		completeUntil(code, path, expected);
 		long t0 = System.nanoTime();
-		final int n = complete(code + more, path, true).size();
+		final int n = complete(code + more, path).size();
 		final long cached = System.nanoTime() - t0;
 		final String other = code.substring(0, code.lastIndexOf('.') + 1) + "s";
 		final ScriptSession session = session(path);
 		t0 = System.nanoTime();
-		final CompletionList first = session.completion(other, other.length())
-			.get(1, TimeUnit.MINUTES);
-		final long wait = System.nanoTime() - t0;
-		final CompletionList update = first instanceof UpdatingCompletionList
-			? ((UpdatingCompletionList) first).update().get(1, TimeUnit.MINUTES)
-			: first;
+		final CompletionList all = session.completion(other, other.length()).get(
+			1, TimeUnit.MINUTES);
 		final long arrived = System.nanoTime() - t0;
 		System.out.println("[completion timing] same word (cached): " + cached /
-			1000000 + " ms, " + n + " completions; new word: editor waits " + wait /
-				1000000 + " ms, all servers' " + update.getItems().size() +
-			" completions after " + arrived / 1000000 + " ms");
+			1000000 + " ms, " + n + " completions; new word: " + all.getItems()
+				.size() + " completions after " + arrived / 1000000 + " ms");
 	}
 }
