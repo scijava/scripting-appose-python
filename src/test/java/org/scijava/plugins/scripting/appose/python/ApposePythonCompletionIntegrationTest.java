@@ -243,7 +243,7 @@ public class ApposePythonCompletionIntegrationTest {
 	/** The session about a script (null path: untitled). */
 	private static ScriptSession session(final String path) {
 		return sessions.computeIfAbsent(path == null ? "" : path, p -> servers
-			.session(language).setFile(path == null ? null : new File(path)));
+			.session(language).setFile(() -> path == null ? null : new File(path)));
 	}
 
 	/** Tells the servers a script's text. */
