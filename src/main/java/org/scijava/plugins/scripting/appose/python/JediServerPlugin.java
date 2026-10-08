@@ -35,15 +35,15 @@ import java.util.Map;
 import org.eclipse.lsp4j.TextDocumentItem;
 import org.eclipse.lsp4j.services.LanguageServer;
 import org.scijava.Priority;
-import org.scijava.code.lsp.LanguageServerService;
-import org.scijava.code.lsp.ScriptDocument;
 import org.scijava.code.lsp.Environment;
 import org.scijava.code.lsp.LanguageServerPlugin;
-import org.scijava.plugins.scripting.appose.python.completion.PythonCompletionServer;
-import org.scijava.code.lsp.TransformingLanguageServer;
+import org.scijava.code.lsp.LanguageServerService;
+import org.scijava.code.lsp.script.ScriptDocument;
+import org.scijava.code.lsp.script.TransformingLanguageServer;
 import org.scijava.plugin.Parameter;
 import org.scijava.plugin.Plugin;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerService;
+import org.scijava.plugins.scripting.appose.python.completion.PythonCompletionServer;
 import org.scijava.script.ScriptLanguage;
 
 /**

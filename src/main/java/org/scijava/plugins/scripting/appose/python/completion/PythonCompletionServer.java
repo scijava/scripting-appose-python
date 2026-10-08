@@ -49,7 +49,7 @@ import org.eclipse.lsp4j.DidCloseTextDocumentParams;
 import org.eclipse.lsp4j.DidOpenTextDocumentParams;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import org.eclipse.lsp4j.services.LanguageServer;
-import org.scijava.code.lsp.Callable;
+import org.scijava.code.lsp.jvm.Callable;
 import org.scijava.code.lsp.Positions;
 
 /**
