@@ -66,7 +66,7 @@ import org.eclipse.lsp4j.services.LanguageServer;
 import org.eclipse.lsp4j.services.TextDocumentService;
 import org.eclipse.lsp4j.services.WorkspaceService;
 import org.junit.Test;
-import org.scijava.code.lsp.Callable;
+import org.scijava.code.lsp.jvm.Callable;
 import org.scijava.code.lsp.Positions;
 
 /**

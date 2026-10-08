@@ -36,8 +36,8 @@ import java.util.Map;
 import java.util.concurrent.Callable;
 
 import org.scijava.code.lsp.Environment;
-import org.scijava.code.lsp.LspConnection;
-import org.scijava.code.lsp.LspServerSpec;
+import org.scijava.code.lsp.launch.LspConnection;
+import org.scijava.code.lsp.launch.LspServerSpec;
 
 /**
  * Starts jedi-language-server, with the Python of a tooling environment, to

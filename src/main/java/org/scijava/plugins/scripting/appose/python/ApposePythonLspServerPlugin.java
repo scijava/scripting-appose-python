@@ -29,8 +29,8 @@
 
 package org.scijava.plugins.scripting.appose.python;
 
-import org.scijava.code.lsp.LspServerPlugin;
-import org.scijava.code.lsp.LspServerSpec;
+import org.scijava.code.lsp.launch.LspServerPlugin;
+import org.scijava.code.lsp.launch.LspServerSpec;
 import org.scijava.plugin.Parameter;
 import org.scijava.plugin.Plugin;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerService;
