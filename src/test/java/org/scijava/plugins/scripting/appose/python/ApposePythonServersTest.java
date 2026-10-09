@@ -137,7 +137,7 @@ public class ApposePythonServersTest {
 		final Environment env = plugin.environment(new TextDocumentItem(
 			"untitled:/a.py", "appose-python", 2, "import os\nos.pa"));
 		assertNull(env.interpreter());
-		assertTrue(env.searchPaths().isEmpty());
+		assertTrue(env.paths().isEmpty());
 	}
 
 	@Test
@@ -161,7 +161,7 @@ public class ApposePythonServersTest {
 		assertEquals(Collections.singletonList(Collections.singletonList(
 			"tifffile")), installed);
 		assertEquals(Collections.singletonList("/overlays/blur"), plugin.environment(
-			doc).searchPaths());
+			doc).paths());
 	}
 
 	@Test
@@ -291,7 +291,7 @@ public class ApposePythonServersTest {
 		assertEquals("{workspace={environmentPath=/env/bin/python, " +
 			"extraPaths=[/overlay]}, " + diagnostics + "}", String.valueOf(spec
 				.initializationOptions(new Environment(
-					"/env/bin/python", Collections.singletonList("/overlay"), null, null))));
+					"/env/bin/python", Collections.singletonList("/overlay"), null))));
 		// Without a script environment: the server's own.
 		assertEquals("{workspace={extraPaths=[]}, " + diagnostics + "}", String
 			.valueOf(spec.initializationOptions(
