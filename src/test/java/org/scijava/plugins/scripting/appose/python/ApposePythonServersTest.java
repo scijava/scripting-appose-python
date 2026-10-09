@@ -30,6 +30,7 @@
 package org.scijava.plugins.scripting.appose.python;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -120,6 +121,10 @@ public class ApposePythonServersTest {
 		assertEquals("float", detail(header + "x = si", "sigma"));
 		assertEquals("numpy.ndarray", detail(header + "x = ima", "image"));
 		assertEquals("appose.python_worker.Task", detail(header + "ta", "task"));
+		// Modules imported only to declare those: not completed.
+		assertFalse(complete(header + "nu").contains("numpy"));
+		assertFalse(complete(header + "ap").contains("appose"));
+		assertTrue(complete(header + "import numpy\nnu").contains("numpy"));
 		// Nothing on parameter lines, in strings or comments.
 		assertTrue(complete("#@ String na").isEmpty());
 		assertTrue(complete("s = 'pri").isEmpty());
