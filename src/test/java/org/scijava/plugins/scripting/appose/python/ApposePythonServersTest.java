@@ -53,7 +53,7 @@ import org.scijava.code.lsp.LanguageServerService;
 import org.scijava.code.lsp.Environment;
 import org.scijava.code.lsp.LanguageServerPlugin;
 import org.scijava.code.lsp.ScriptSession;
-import org.scijava.code.lsp.script.ScriptDocument;
+import org.scijava.code.lsp.ScriptDocument;
 import org.scijava.plugin.PluginService;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerService;
 import org.scijava.plugins.scripting.appose.python.completion.ApposePythonDialect;
