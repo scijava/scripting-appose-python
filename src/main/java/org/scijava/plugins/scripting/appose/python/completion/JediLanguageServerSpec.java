@@ -126,7 +126,7 @@ public class JediLanguageServerSpec implements LspServerSpec {
 		if (env.interpreter() != null) {
 			workspaceOptions.put("environmentPath", env.interpreter());
 		}
-		workspaceOptions.put("extraPaths", env.searchPaths());
+		workspaceOptions.put("extraPaths", env.paths());
 		final Map<String, Object> options = new LinkedHashMap<>();
 		options.put("workspace", workspaceOptions);
 		// NB: Jedi's diagnostics are syntax errors, found as the script changes.

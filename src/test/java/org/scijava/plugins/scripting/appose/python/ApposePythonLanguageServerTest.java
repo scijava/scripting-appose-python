@@ -202,7 +202,7 @@ public class ApposePythonLanguageServerTest {
 	{
 		final ApposePythonLanguageServer s = new ApposePythonLanguageServer(syntax,
 			doc -> new Environment(doc.getText().contains("#env=B") ? "B"
-				: fallback, null, null, null), jedi, null);
+				: fallback, null, null), jedi, null);
 		s.connect(new Client());
 		s.initialize(new InitializeParams());
 		return s;

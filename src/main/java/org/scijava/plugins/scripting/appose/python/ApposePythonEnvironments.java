@@ -137,7 +137,7 @@ final class ApposePythonEnvironments {
 		final String python = scriptPython(text, path);
 		final String overlay = overlay(text, path, python, settled);
 		return new org.scijava.code.lsp.Environment(python, overlay == null ? null
-			: Collections.singletonList(overlay), null, null);
+			: Collections.singletonList(overlay), null);
 	}
 
 	/**
