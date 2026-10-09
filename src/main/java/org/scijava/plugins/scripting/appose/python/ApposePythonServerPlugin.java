@@ -29,17 +29,13 @@
 
 package org.scijava.plugins.scripting.appose.python;
 
-import java.util.Collections;
-import java.util.Map;
-
 import org.eclipse.lsp4j.TextDocumentItem;
 import org.eclipse.lsp4j.services.LanguageServer;
 import org.scijava.Priority;
 import org.scijava.code.lsp.Environment;
 import org.scijava.code.lsp.LanguageServerPlugin;
 import org.scijava.code.lsp.LanguageServerService;
-import org.scijava.code.lsp.script.ScriptDocument;
-import org.scijava.code.lsp.script.TransformingLanguageServer;
+import org.scijava.code.lsp.script.ScriptDialect;
 import org.scijava.plugin.Parameter;
 import org.scijava.plugin.Plugin;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerService;
@@ -56,8 +52,9 @@ import org.scijava.script.ScriptLanguage;
  * script declares but its environment lacks are installed for completion only
  * (see
  * {@link org.scijava.plugins.scripting.appose.python.completion.DependencyOverlays}).
- * Jedi sees the script as plain Python, its parameters declared with the
- * types they have when it runs (e.g. images as NumPy arrays).
+ * Both see the script as plain Python, its parameters declared with the
+ * types they have when it runs (e.g. images as NumPy arrays; see
+ * {@link #dialect()}).
  * <p>
  * Completion never builds a script's environment, and never disturbs its
  * worker.
@@ -86,9 +83,14 @@ public class ApposePythonServerPlugin implements LanguageServerPlugin {
 	@Override
 	public LanguageServer create(final Environment environment) {
 		final boolean jedi = jediOffered();
-		return new ApposePythonLanguageServer(new PythonSyntaxLanguageServer(
-			servers), this::environment, jedi ? this::jedi : null,
-			ApposePythonEnvironments.of(workers));
+		return new ApposePythonLanguageServer(new PythonSyntaxLanguageServer(),
+			this::environment, jedi ? this::jedi : null, ApposePythonEnvironments.of(
+				workers));
+	}
+
+	@Override
+	public ScriptDialect dialect() {
+		return PythonSyntaxLanguageServer.DIALECT;
 	}
 
 	/** Whether jedi-language-server is offered. */
@@ -108,16 +110,7 @@ public class ApposePythonServerPlugin implements LanguageServerPlugin {
 
 	/** Makes a jedi for scripts running in an environment. */
 	private LanguageServer jedi(final Environment environment) {
-		return new PythonCompletionServer(new TransformingLanguageServer(servers
-			.launch("python", environment), text -> document(text, environment)),
+		return new PythonCompletionServer(servers.launch("python", environment),
 			SIGNATURES);
-	}
-
-	/** The script as plain Python, for jedi. */
-	ScriptDocument document(final String text, final Environment environment) {
-		final Map<String, Class<?>> params = servers == null ? Collections
-			.emptyMap() : servers.scriptParameters(text);
-		return ScriptDocument.of(text, params, PythonSyntaxLanguageServer.DIALECT,
-			environment);
 	}
 }

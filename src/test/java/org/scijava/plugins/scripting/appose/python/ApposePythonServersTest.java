@@ -52,6 +52,7 @@ import org.scijava.code.lsp.LanguageServerService;
 import org.scijava.code.lsp.Environment;
 import org.scijava.code.lsp.LanguageServerPlugin;
 import org.scijava.code.lsp.ScriptSession;
+import org.scijava.code.lsp.script.ScriptDocument;
 import org.scijava.plugin.PluginService;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerService;
 import org.scijava.plugins.scripting.appose.python.completion.ApposePythonDialect;
@@ -115,6 +116,10 @@ public class ApposePythonServersTest {
 		assertTrue(complete(header + "x = si").contains("sigma"));
 		assertTrue(complete(header + "pri").contains("print"));
 		assertTrue(complete(header + "ta").contains("task"));
+		// Declared with the types they have when the script runs.
+		assertEquals("float", detail(header + "x = si", "sigma"));
+		assertEquals("numpy.ndarray", detail(header + "x = ima", "image"));
+		assertEquals("appose.python_worker.Task", detail(header + "ta", "task"));
 		// Nothing on parameter lines, in strings or comments.
 		assertTrue(complete("#@ String na").isEmpty());
 		assertTrue(complete("s = 'pri").isEmpty());
@@ -124,9 +129,9 @@ public class ApposePythonServersTest {
 	public void testScriptAsPython() {
 		final String code = "#@ net.imglib2.img.Img image\n#@ double sigma\n" +
 			"image.sha";
-		// The script's parameters are typed in a preamble, so the server knows
+		// The script's parameters are typed in a preamble, so the servers know
 		// them.
-		assertTrue(plugin.document(code, Environment.NONE).text().startsWith(
+		assertTrue(document(code).text().startsWith(
 			"import appose.python_worker; import numpy; image: numpy.ndarray; " +
 				"sigma: float; task: appose.python_worker.Task\n"));
 	}
@@ -303,15 +308,30 @@ public class ApposePythonServersTest {
 
 	// -- Helper methods --
 
+	/** The script as plain Python, as the plugin's servers see it. */
+	private ScriptDocument document(final String code) {
+		return ScriptDocument.of(code, context.service(LanguageServerService.class)
+			.scriptParameters(code), plugin.dialect());
+	}
+
 	/** Completes with the syntax-only server. */
 	private List<String> complete(final String code) {
+		return items(code).stream().map(CompletionItem::getLabel).collect(
+			Collectors.toList());
+	}
+
+	/** The detail of a completion with the syntax-only server, or null. */
+	private String detail(final String code, final String label) {
+		return items(code).stream().filter(i -> i.getLabel().equals(label))
+			.findFirst().map(CompletionItem::getDetail).orElse(null);
+	}
+
+	private List<CompletionItem> items(final String code) {
 		try (ScriptSession session = ScriptSession.owning(
-			new PythonSyntaxLanguageServer(context.service(
-				LanguageServerService.class)), language))
+			new PythonSyntaxLanguageServer(), language, this::document))
 		{
 			return session.completion(code, code.length()).get(10,
-				TimeUnit.SECONDS).getItems().stream().map(CompletionItem::getLabel)
-				.collect(Collectors.toList());
+				TimeUnit.SECONDS).getItems();
 		}
 		catch (final Exception exc) {
 			throw new RuntimeException(exc);

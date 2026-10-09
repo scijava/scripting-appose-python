@@ -30,16 +30,12 @@
 package org.scijava.plugins.scripting.appose.python;
 
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 
 import org.eclipse.lsp4j.CompletionItem;
 import org.eclipse.lsp4j.CompletionItemKind;
 import org.eclipse.lsp4j.CompletionList;
-import org.scijava.code.lsp.LanguageServerService;
 import org.scijava.code.lsp.jvm.ScriptLanguageServer;
 import org.scijava.plugins.scripting.appose.python.completion.ApposePythonDialect;
 import org.scijava.plugins.scripting.appose.python.completion.PythonSyntax;
@@ -48,9 +44,9 @@ import org.scijava.plugins.scripting.appose.python.completion.PythonSyntax.Kind;
 /**
  * An in-process language server for Python scripts run via Appose, from the
  * syntax alone ({@link PythonSyntax}: tree-sitter): instantly, with no Python
- * needed, names in scope, the script's parameters, {@code task}, builtins and
- * keywords; and, after a dot, the names used after dots elsewhere in the
- * script. (A Python language server, e.g. jedi-language-server, knows more;
+ * needed, names in scope (including the script's parameters and {@code task},
+ * declared as {@link #DIALECT} says), builtins and keywords; and, after a dot,
+ * the names used after dots elsewhere in the script. (A Python language server, e.g. jedi-language-server, knows more;
  * see {@link ApposePythonLanguageServer}.)
  *
  * @author Gabriel Selzer
@@ -59,12 +55,8 @@ public class PythonSyntaxLanguageServer extends ScriptLanguageServer {
 
 	static final ApposePythonDialect DIALECT = new ApposePythonDialect();
 
-	private final LanguageServerService servers;
-
-	/** @param servers Reads the scripts' parameters. */
-	public PythonSyntaxLanguageServer(final LanguageServerService servers) {
+	public PythonSyntaxLanguageServer() {
 		super(null);
-		this.servers = servers;
 	}
 
 	@Override
@@ -75,20 +67,7 @@ public class PythonSyntaxLanguageServer extends ScriptLanguageServer {
 		{
 			return list(doc, caret, caret, new ArrayList<>());
 		}
-		return list(doc, ctx.replaceStart, caret, localCompletions(ctx, parameters(
-			doc.text())));
-	}
-
-	/**
-	 * The script's parameters, with the Python types they have when the script
-	 * runs (null if unknown).
-	 */
-	private Map<String, String> parameters(final String text) {
-		final Map<String, String> params = new LinkedHashMap<>();
-		if (servers == null) return params;
-		servers.scriptParameters(text).forEach((name, type) -> params.put(name,
-			DIALECT.runtimeType(type)));
-		return params;
+		return list(doc, ctx.replaceStart, caret, localCompletions(ctx));
 	}
 
 	private static CompletionItem item(final String name,
@@ -103,7 +82,7 @@ public class PythonSyntaxLanguageServer extends ScriptLanguageServer {
 
 	/** Completions from the local (syntactic) analysis alone. */
 	private static List<CompletionItem> localCompletions(
-		final PythonSyntax.Context ctx, final Map<String, String> params)
+		final PythonSyntax.Context ctx)
 	{
 		final List<CompletionItem> out = new ArrayList<>();
 		final String prefix = ctx.prefix;
@@ -117,15 +96,8 @@ public class PythonSyntaxLanguageServer extends ScriptLanguageServer {
 		if (ctx.kind != Kind.NAME) return out;
 		for (final String name : ctx.names) {
 			if (matches(name, prefix)) out.add(item(name,
-				CompletionItemKind.Variable, null));
+				CompletionItemKind.Variable, ctx.types.get(name)));
 		}
-		for (final Map.Entry<String, String> p : params.entrySet()) {
-			if (matches(p.getKey(), prefix)) out.add(item(p.getKey(),
-				CompletionItemKind.Variable, p.getValue() == null ? "Script parameter"
-					: p.getValue() + " (script parameter)"));
-		}
-		if (matches("task", prefix)) out.add(item("task",
-			CompletionItemKind.Variable, ApposePythonDialect.TASK_TYPE));
 		for (final String name : PythonSyntax.BUILTINS) {
 			if (matches(name, prefix)) out.add(item(name, CompletionItemKind.Function,
 				"builtin"));
