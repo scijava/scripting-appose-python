@@ -34,8 +34,10 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -91,18 +93,25 @@ public final class PythonSyntax {
 		/** Names in scope at the caret, innermost first. */
 		public final Set<String> names;
 
+		/**
+		 * The types names in scope are annotated with, as written (e.g.
+		 * {@code numpy.ndarray} for {@code image: numpy.ndarray}), by name.
+		 */
+		public final Map<String, String> types;
+
 		/** For {@link Kind#ATTRIBUTE}: attributes used on the same receiver. */
 		public final Set<String> attributesUsed;
 
 		private Context(final Kind kind, final String prefix,
 			final int replaceStart, final String receiver, final Set<String> names,
-			final Set<String> attributesUsed)
+			final Map<String, String> types, final Set<String> attributesUsed)
 		{
 			this.kind = kind;
 			this.prefix = prefix;
 			this.replaceStart = replaceStart;
 			this.receiver = receiver;
 			this.names = names;
+			this.types = types;
 			this.attributesUsed = attributesUsed;
 		}
 	}
@@ -177,18 +186,20 @@ public final class PythonSyntax {
 		// Parse the script up to the caret, with the partial identifier replaced
 		// by a placeholder, and any open brackets closed: a clean tree there.
 		final String source = textBefore + CARET + closers;
-		final Set<String> names = kind == Kind.NAME ? namesInScope(source,
-			textBefore.length()) : new LinkedHashSet<>();
+		final Set<String> names = new LinkedHashSet<>();
+		final Map<String, String> types = new HashMap<>();
+		if (kind == Kind.NAME) namesInScope(source, textBefore.length(), names,
+			types);
 		final Set<String> used = kind == Kind.ATTRIBUTE && receiver != null
 			? attributesUsed(text, receiver, start) : new LinkedHashSet<>();
-		return new Context(kind, prefix, start, receiver, names, used);
+		return new Context(kind, prefix, start, receiver, names, types, used);
 	}
 
 	// -- Helper methods --
 
 	private static Context none(final String prefix, final int start) {
 		return new Context(Kind.NONE, prefix, start, null, new LinkedHashSet<>(),
-			new LinkedHashSet<>());
+			new HashMap<>(), new LinkedHashSet<>());
 	}
 
 	/**
@@ -272,14 +283,16 @@ public final class PythonSyntax {
 		return used;
 	}
 
-	/** Names in scope at the placeholder, which starts at {@code caret}. */
-	private static Set<String> namesInScope(final String source,
-		final int caret)
+	/**
+	 * Finds the names in scope at the placeholder, which starts at
+	 * {@code caret}, and the types they are annotated with.
+	 */
+	private static void namesInScope(final String source, final int caret,
+		final Set<String> names, final Map<String, String> types)
 	{
 		final byte[] bytes = source.getBytes(StandardCharsets.UTF_8);
 		final int caretByte = source.substring(0, caret).getBytes(
 			StandardCharsets.UTF_8).length;
-		final Set<String> names = new LinkedHashSet<>();
 		final TSParser parser = new TSParser();
 		try {
 			parser.setLanguage(new TreeSitterPython());
@@ -305,13 +318,13 @@ public final class PythonSyntax {
 				if (type.endsWith("comprehension") || type.equals(
 					"generator_expression"))
 				{
-					collectBindings(node, bytes, names, true);
+					collectBindings(node, bytes, names, types, true);
 				}
 				else if (body != null && !body.isNull() && !type.equals("lambda")) {
-					collectBindings(body, bytes, names, false);
+					collectBindings(body, bytes, names, types, false);
 				}
 			}
-			collectBindings(root, bytes, names, false);
+			collectBindings(root, bytes, names, types, false);
 		}
 		catch (final RuntimeException | LinkageError exc) {
 			// NB: Native parser unavailable or failed: no names, then.
@@ -320,15 +333,16 @@ public final class PythonSyntax {
 			parser.close();
 		}
 		names.remove(CARET);
-		return names;
 	}
 
 	/**
 	 * Collects the names bound by statements within {@code node}, without
-	 * descending into nested scopes (whose own names are bound here, though).
+	 * descending into nested scopes (whose own names are bound here, though);
+	 * and the types annotated names are declared with.
 	 */
 	private static void collectBindings(final TSNode node, final byte[] bytes,
-		final Set<String> names, final boolean comprehension)
+		final Set<String> names, final Map<String, String> types,
+		final boolean comprehension)
 	{
 		final int n = node.getNamedChildCount();
 		for (int i = 0; i < n; i++) {
@@ -347,6 +361,9 @@ public final class PythonSyntax {
 					if (!comprehension) continue; // NB: A nested scope.
 					break;
 				case "assignment":
+					addType(child, bytes, types);
+					addTargets(child.getChildByFieldName("left"), bytes, names);
+					break;
 				case "augmented_assignment":
 				case "for_statement":
 				case "for_in_clause":
@@ -366,8 +383,19 @@ public final class PythonSyntax {
 					continue;
 				default:
 			}
-			collectBindings(child, bytes, names, comprehension);
+			collectBindings(child, bytes, names, types, comprehension);
 		}
+	}
+
+	/** Adds the type of an annotated assignment, e.g. {@code x: int = 1}. */
+	private static void addType(final TSNode assignment, final byte[] bytes,
+		final Map<String, String> types)
+	{
+		final TSNode left = assignment.getChildByFieldName("left");
+		final TSNode type = assignment.getChildByFieldName("type");
+		if (left == null || left.isNull() || !left.getType().equals(
+			"identifier") || type == null || type.isNull()) return;
+		types.putIfAbsent(text(left, bytes), text(type, bytes));
 	}
 
 	/** Adds the names an import statement binds. */
@@ -428,8 +456,12 @@ public final class PythonSyntax {
 	{
 		if (node == null || node.isNull() || !node.getType().equals(
 			"identifier")) return;
-		names.add(new String(bytes, node.getStartByte(), node.getEndByte() - node
-			.getStartByte(), StandardCharsets.UTF_8));
+		names.add(text(node, bytes));
+	}
+
+	private static String text(final TSNode node, final byte[] bytes) {
+		return new String(bytes, node.getStartByte(), node.getEndByte() - node
+			.getStartByte(), StandardCharsets.UTF_8);
 	}
 
 	private static boolean isIdentifierPart(final char c) {
