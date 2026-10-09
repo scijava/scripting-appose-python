@@ -95,6 +95,13 @@ public final class ApposePythonDialect implements ScriptDialect {
 	}
 
 	@Override
+	public String imported(final String statement) {
+		// NB: "import a.b" binds a.
+		return statement.startsWith("import ") ? statement.substring(7).split(
+			"[.\\s]")[0] : null;
+	}
+
+	@Override
 	public List<String> extraDeclarations() {
 		return Collections.singletonList(declare("task", TASK_TYPE));
 	}
