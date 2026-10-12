@@ -49,11 +49,13 @@ import org.scijava.plugins.scripting.appose.python._internal.InlineMetadata;
  * directive.
  * <p>
  * Both running a script ({@link ApposePythonScriptEngine}) and completing code
- * in it ({@link ApposePythonServerPlugin}) resolve its environment here, so
- * that they agree on the environment's name and configuration.
+ * in it ({@link
+ * org.scijava.plugins.scripting.appose.python.completion.ApposePythonServerPlugin})
+ * resolve its environment here, so that they agree on the environment's name
+ * and configuration.
  * </p>
  */
-final class ScriptEnvironment {
+public final class ScriptEnvironment {
 
 	/** The {@code #@script(...)} directive. */
 	private static final Pattern SCRIPT_DIRECTIVE = Pattern.compile(
@@ -64,7 +66,7 @@ final class ScriptEnvironment {
 		"(\\w+)\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^,\\s)]+))");
 
 	/** Name of the environment. */
-	final String name;
+	public final String name;
 
 	/** The environment's configuration, e.g. the contents of its file. */
 	final String content;
@@ -94,8 +96,9 @@ final class ScriptEnvironment {
 	 *           malformed, given twice, or naming a missing file.
 	 * @throws IOException If the environment file cannot be read.
 	 */
-	static ScriptEnvironment of(final String script, final String scriptPath,
-		final String envRef, final String scheme) throws IOException
+	public static ScriptEnvironment of(final String script,
+		final String scriptPath, final String envRef, final String scheme)
+		throws IOException
 	{
 		final String metadata = InlineMetadata.extract(script);
 		if (metadata != null) {
@@ -134,7 +137,9 @@ final class ScriptEnvironment {
 	 *          {@link InlineMetadata#extract}).
 	 * @param scriptPath The script's file path, or null if unsaved.
 	 */
-	static String inlineName(final String metadata, final String scriptPath) {
+	public static String inlineName(final String metadata,
+		final String scriptPath)
+	{
 		// Note: Name the environment after the script, as for environment
 		// files, so that editing the metadata updates the environment and
 		// replaces its worker, rather than leaving the old one running.
@@ -147,7 +152,7 @@ final class ScriptEnvironment {
 	 * Gets the attributes of a script's {@code #@script(...)} directive, e.g.
 	 * {@code env} and {@code scheme}, without fully parsing its parameters.
 	 */
-	static Map<String, String> directive(final String script) {
+	public static Map<String, String> directive(final String script) {
 		final Map<String, String> attrs = new HashMap<>();
 		final Matcher m = SCRIPT_DIRECTIVE.matcher(script);
 		if (!m.find()) return attrs;
@@ -165,7 +170,7 @@ final class ScriptEnvironment {
 	 * org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerService}
 	 * keeps the environment: changes to it replace the environment's worker.
 	 */
-	String config() {
+	public String config() {
 		return scheme + "\n" + content;
 	}
 

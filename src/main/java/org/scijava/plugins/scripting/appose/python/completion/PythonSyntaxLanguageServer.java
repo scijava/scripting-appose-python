@@ -27,7 +27,7 @@
  * #L%
  */
 
-package org.scijava.plugins.scripting.appose.python;
+package org.scijava.plugins.scripting.appose.python.completion;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -37,8 +37,6 @@ import org.eclipse.lsp4j.CompletionItem;
 import org.eclipse.lsp4j.CompletionItemKind;
 import org.eclipse.lsp4j.CompletionList;
 import org.scijava.code.lsp.jvm.ScriptLanguageServer;
-import org.scijava.plugins.scripting.appose.python.completion.ApposePythonDialect;
-import org.scijava.plugins.scripting.appose.python.completion.PythonSyntax;
 import org.scijava.plugins.scripting.appose.python.completion.PythonSyntax.Kind;
 
 /**
