@@ -44,11 +44,25 @@ import org.eclipse.lsp4j.CompletionItem;
 import org.eclipse.lsp4j.CompletionItemKind;
 import org.eclipse.lsp4j.CompletionList;
 import org.eclipse.lsp4j.CompletionParams;
+import org.eclipse.lsp4j.DidChangeConfigurationParams;
 import org.eclipse.lsp4j.DidChangeTextDocumentParams;
+import org.eclipse.lsp4j.DidChangeWatchedFilesParams;
 import org.eclipse.lsp4j.DidCloseTextDocumentParams;
 import org.eclipse.lsp4j.DidOpenTextDocumentParams;
+import org.eclipse.lsp4j.DidSaveTextDocumentParams;
+import org.eclipse.lsp4j.Hover;
+import org.eclipse.lsp4j.HoverParams;
+import org.eclipse.lsp4j.InitializeParams;
+import org.eclipse.lsp4j.InitializeResult;
+import org.eclipse.lsp4j.InitializedParams;
+import org.eclipse.lsp4j.SignatureHelp;
+import org.eclipse.lsp4j.SignatureHelpParams;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
+import org.eclipse.lsp4j.services.LanguageClient;
+import org.eclipse.lsp4j.services.LanguageClientAware;
 import org.eclipse.lsp4j.services.LanguageServer;
+import org.eclipse.lsp4j.services.TextDocumentService;
+import org.eclipse.lsp4j.services.WorkspaceService;
 import org.scijava.code.lsp.jvm.Callable;
 import org.scijava.code.lsp.Positions;
 
@@ -65,10 +79,15 @@ import org.scijava.code.lsp.Positions;
  * {@link Callable}s: snippets with their parameters and types. (Not in
  * imports: an import names things, rather than calling them.)</li>
  * </ul>
+ * <p>
+ * Everything else is passed on to the server as is.
+ * </p>
  *
  * @author Gabriel Selzer
  */
-public class PythonCompletionServer extends DelegatingLanguageServer {
+public class PythonCompletionServer implements LanguageServer,
+	TextDocumentService, WorkspaceService, LanguageClientAware
+{
 
 	/** How long an answer may be reused, in milliseconds. */
 	private static final long ANSWER_LIFETIME = 20_000;
@@ -76,6 +95,9 @@ public class PythonCompletionServer extends DelegatingLanguageServer {
 	/** An import statement being typed. */
 	private static final Pattern IMPORT = Pattern.compile(
 		"^\\s*(from|import)\\s");
+
+	/** The Python language server. */
+	private final LanguageServer inner;
 
 	private final int signatures;
 	private final LongSupplier clock;
@@ -111,16 +133,61 @@ public class PythonCompletionServer extends DelegatingLanguageServer {
 	PythonCompletionServer(final LanguageServer inner, final int signatures,
 		final LongSupplier clock)
 	{
-		super(inner);
+		this.inner = inner;
 		this.signatures = signatures;
 		this.clock = clock;
 	}
+
+	// -- LanguageClientAware --
+
+	@Override
+	public void connect(final LanguageClient client) {
+		if (inner instanceof LanguageClientAware) {
+			((LanguageClientAware) inner).connect(client);
+		}
+	}
+
+	// -- LanguageServer --
+
+	@Override
+	public CompletableFuture<InitializeResult> initialize(
+		final InitializeParams params)
+	{
+		return inner.initialize(params);
+	}
+
+	@Override
+	public void initialized(final InitializedParams params) {
+		inner.initialized(params);
+	}
+
+	@Override
+	public CompletableFuture<Object> shutdown() {
+		return inner.shutdown();
+	}
+
+	@Override
+	public void exit() {
+		inner.exit();
+	}
+
+	@Override
+	public TextDocumentService getTextDocumentService() {
+		return this;
+	}
+
+	@Override
+	public WorkspaceService getWorkspaceService() {
+		return this;
+	}
+
+	// -- TextDocumentService --
 
 	@Override
 	public void didOpen(final DidOpenTextDocumentParams params) {
 		texts.put(params.getTextDocument().getUri(), params.getTextDocument()
 			.getText());
-		super.didOpen(params);
+		inner.getTextDocumentService().didOpen(params);
 	}
 
 	@Override
@@ -129,14 +196,14 @@ public class PythonCompletionServer extends DelegatingLanguageServer {
 			texts.put(params.getTextDocument().getUri(), params.getContentChanges()
 				.get(params.getContentChanges().size() - 1).getText());
 		}
-		super.didChange(params);
+		inner.getTextDocumentService().didChange(params);
 	}
 
 	@Override
 	public void didClose(final DidCloseTextDocumentParams params) {
 		texts.remove(params.getTextDocument().getUri());
 		pending.remove(params.getTextDocument().getUri());
-		super.didClose(params);
+		inner.getTextDocumentService().didClose(params);
 	}
 
 	@Override
@@ -145,7 +212,8 @@ public class PythonCompletionServer extends DelegatingLanguageServer {
 	{
 		final String uri = params.getTextDocument().getUri();
 		final String text = texts.get(uri);
-		if (text == null) return super.completion(params);
+		if (text == null) return inner.getTextDocumentService().completion(
+			params);
 		final int caret = Math.min(Positions.offset(text, params.getPosition()),
 			text.length());
 		int start = caret;
@@ -173,7 +241,7 @@ public class PythonCompletionServer extends DelegatingLanguageServer {
 			final CompletionParams p = new CompletionParams(params.getTextDocument(),
 				Positions.position(text, ask), params.getContext());
 			final CompletableFuture<Either<List<CompletionItem>, CompletionList>> raw =
-				super.completion(p);
+				inner.getTextDocumentService().completion(p);
 			final int n = word.isEmpty() || importing ? 0 : signatures;
 			answer = new Answer(raw, raw.thenCompose(list -> resolve(list, n)), now);
 			synchronized (answers) {
@@ -191,6 +259,44 @@ public class PythonCompletionServer extends DelegatingLanguageServer {
 		return answer.future.thenApply(list -> Either.forRight(filter(list,
 			word)));
 	}
+
+	@Override
+	public void didSave(final DidSaveTextDocumentParams params) {
+		inner.getTextDocumentService().didSave(params);
+	}
+
+	@Override
+	public CompletableFuture<CompletionItem> resolveCompletionItem(
+		final CompletionItem item)
+	{
+		return inner.getTextDocumentService().resolveCompletionItem(item);
+	}
+
+	@Override
+	public CompletableFuture<SignatureHelp> signatureHelp(
+		final SignatureHelpParams params)
+	{
+		return inner.getTextDocumentService().signatureHelp(params);
+	}
+
+	@Override
+	public CompletableFuture<Hover> hover(final HoverParams params) {
+		return inner.getTextDocumentService().hover(params);
+	}
+
+	// -- WorkspaceService --
+
+	@Override
+	public void didChangeConfiguration(final DidChangeConfigurationParams p) {
+		inner.getWorkspaceService().didChangeConfiguration(p);
+	}
+
+	@Override
+	public void didChangeWatchedFiles(final DidChangeWatchedFilesParams p) {
+		inner.getWorkspaceService().didChangeWatchedFiles(p);
+	}
+
+	// -- Helper methods --
 
 	/** Resolves the first completions, making those with signatures callables. */
 	private CompletableFuture<CompletionList> resolve(
