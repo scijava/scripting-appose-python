@@ -137,30 +137,25 @@ script's own line numbers.
 
 ## Code completion
 
-The Script Editor completes code in these scripts with one language server
+The Script Editor completes code in these scripts with a language server
 (`ApposePythonLanguageServer`, offered to `scijava-code-lsp`'s
 `LanguageServerService` by `ApposePythonServerPlugin`, so any other LSP client
-of it gets the same), combining two sources: jedi's answers first, then the
-syntax-only ones for names jedi has not completed.
+of it gets the same): [jedi-language-server](https://github.com/pappasam/jedi-language-server)
+(built on [Jedi](https://jedi.readthedocs.io/)). It completes names in scope,
+the script's `#@` parameters, `task`, builtins and keywords, and members of
+objects and modules; and it gives function signatures (with parameter names
+and types), documentation, hover and syntax errors.
 
-* **Instantly, with no Python needed:** names in scope (variables,
-  functions, classes, imports, parameters of the enclosing function), the
-  script's `#@` parameters, `task`, builtins and keywords. This comes from
-  parsing the script with [tree-sitter](https://tree-sitter.github.io/)
-  (`PythonSyntaxLanguageServer`).
-* **With a language server,
-  [jedi-language-server](https://github.com/pappasam/jedi-language-server)
-  (built on [Jedi](https://jedi.readthedocs.io/)):**
-  members of objects and modules, function signatures (with parameter names
-  and types), documentation, hover and syntax errors. The server runs in a small environment of its own
-  (`appose-python-completion`: Python, jedi-language-server, Appose and uv),
-  which is built in the background the first time you complete code, and
-  takes a while only then. The server talks to the editor via the
-  [Language Server Protocol](https://microsoft.github.io/language-server-protocol/)
-  (see `scijava-code-lsp`); it sees the script as plain Python, with its `#@`
-  parameters declared. One server runs per script environment; servers
-  unused for 10 minutes stop. Their error output goes to
-  `appose-python-completion-server.log`, next to Appose's environments.
+The server runs in a small environment of its own
+(`appose-python-completion`: Python, jedi-language-server, Appose and uv),
+which is built in the background the first time you complete code, and
+takes a while only then; until it is, there are no completions. The server
+talks to the editor via the
+[Language Server Protocol](https://microsoft.github.io/language-server-protocol/)
+(see `scijava-code-lsp`); it sees the script as plain Python, with its `#@`
+parameters declared. One server runs per script environment; servers
+unused for 10 minutes stop. Their error output goes to
+`appose-python-completion-server.log`, next to Appose's environments.
 
 Once a script's environment is built, by running the script (in this session
 or an earlier one), the server analyzes the script against it, so that the packages
@@ -175,6 +170,6 @@ its worker. Script parameters are known by the Python types they have at run
 time, e.g. images as NumPy arrays.
 
 Typing never waits for the server: if its answer for a word is not ready
-within a moment (the first answer for a package can take a few seconds), the
-instant completions show, and the server's are used once ready. Questions
-that are no longer of interest (e.g. as you type on) are cancelled.
+within a moment (the first answer for a package can take a few seconds), it
+is shown once ready. Questions that are no longer of interest (e.g. as you
+type on) are cancelled.

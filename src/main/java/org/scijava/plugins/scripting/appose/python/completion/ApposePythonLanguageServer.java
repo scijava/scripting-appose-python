@@ -6,13 +6,13 @@
  * %%
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- * 
+ *
  * 1. Redistributions of source code must retain the above copyright notice,
  *    this list of conditions and the following disclaimer.
  * 2. Redistributions in binary form must reproduce the above copyright notice,
  *    this list of conditions and the following disclaimer in the documentation
  *    and/or other materials provided with the distribution.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -31,11 +31,8 @@ package org.scijava.plugins.scripting.appose.python.completion;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
@@ -76,22 +73,15 @@ import org.eclipse.lsp4j.services.WorkspaceService;
 import org.scijava.code.lsp.Environment;
 
 /**
- * The language server of Python scripts run via Appose: the syntax-only
- * server (see {@link PythonSyntaxLanguageServer}), instant and needing no
- * Python; and, if offered, jedi-language-server, knowing more.
- * <ul>
- * <li>Completions: jedi's, then the syntax server's that complete other
- * names. (Without jedi, the syntax server's.)</li>
- * <li>Signature help and hover: jedi's, if any; otherwise the syntax
- * server's.</li>
- * <li>Problems: jedi's (the syntax server finds none).</li>
- * </ul>
+ * The language server of Python scripts run via Appose: jedi-language-server,
+ * analyzing each script against where it runs (its environment's Python, once
+ * built, and an overlay of the packages it declares but its environment lacks;
+ * see {@link ApposePythonEnvironments}).
  * <p>
- * Each script is analyzed by a jedi of where it runs: its environment's
- * Python, once built, and an overlay of the packages it declares but its
- * environment lacks (see {@link ApposePythonEnvironments}). As that changes
- * (as the script's metadata is edited, or its environment is built), the
- * script moves to another jedi.
+ * Jedi learns where scripts run only when it starts, so each script is
+ * analyzed by a jedi of its own environment. As that changes (as the script's
+ * metadata is edited, or its environment is built), the script moves to
+ * another jedi.
  * </p>
  *
  * @author Gabriel Selzer
@@ -100,7 +90,6 @@ public class ApposePythonLanguageServer implements LanguageServer,
 	TextDocumentService, WorkspaceService, LanguageClientAware
 {
 
-	private final LanguageServer syntax;
 	private final Function<TextDocumentItem, Environment> environment;
 	private final Function<Environment, LanguageServer> jedi;
 	private final ApposePythonEnvironments environments;
@@ -112,28 +101,20 @@ public class ApposePythonLanguageServer implements LanguageServer,
 	private volatile LanguageClient client;
 
 	/**
-	 * @param syntax The syntax-only server.
 	 * @param environment Gets where a script runs.
-	 * @param jedi Makes a jedi for scripts running in an environment; or null,
-	 *          if jedi is not offered.
+	 * @param jedi Makes a jedi for scripts running in an environment.
 	 * @param environments Tells when where scripts run may have changed without
 	 *          them changing (e.g. as environments are built); or null.
 	 */
-	ApposePythonLanguageServer(final LanguageServer syntax,
+	ApposePythonLanguageServer(
 		final Function<TextDocumentItem, Environment> environment,
 		final Function<Environment, LanguageServer> jedi,
 		final ApposePythonEnvironments environments)
 	{
-		this.syntax = syntax;
 		this.environment = environment;
 		this.jedi = jedi;
 		this.environments = environments;
-		if (syntax instanceof LanguageClientAware) {
-			((LanguageClientAware) syntax).connect(new Forwarder(null));
-		}
-		if (jedi != null && environments != null) {
-			environments.addListener(relocateAll);
-		}
+		if (environments != null) environments.addListener(relocateAll);
 	}
 
 	@Override
@@ -147,8 +128,6 @@ public class ApposePythonLanguageServer implements LanguageServer,
 	public CompletableFuture<InitializeResult> initialize(
 		final InitializeParams params)
 	{
-		syntax.initialize(params).thenRun(() -> syntax.initialized(
-			new InitializedParams()));
 		final ServerCapabilities capabilities = new ServerCapabilities();
 		capabilities.setTextDocumentSync(TextDocumentSyncKind.Full);
 		capabilities.setCompletionProvider(new CompletionOptions(true,
@@ -167,12 +146,12 @@ public class ApposePythonLanguageServer implements LanguageServer,
 			didClose(new DidCloseTextDocumentParams(new TextDocumentIdentifier(
 				uri)));
 		}
-		return syntax.shutdown();
+		return CompletableFuture.completedFuture(null);
 	}
 
 	@Override
 	public void exit() {
-		syntax.exit();
+		// NB: The jedis are let go as their documents close.
 	}
 
 	@Override
@@ -189,8 +168,6 @@ public class ApposePythonLanguageServer implements LanguageServer,
 
 	@Override
 	public void didOpen(final DidOpenTextDocumentParams params) {
-		syntax.getTextDocumentService().didOpen(params);
-		if (jedi == null) return;
 		final Doc doc = new Doc(params.getTextDocument());
 		docs.put(doc.item.getUri(), doc);
 		synchronized (doc) {
@@ -202,7 +179,6 @@ public class ApposePythonLanguageServer implements LanguageServer,
 
 	@Override
 	public void didChange(final DidChangeTextDocumentParams params) {
-		syntax.getTextDocumentService().didChange(params);
 		final Doc doc = docs.get(params.getTextDocument().getUri());
 		final List<TextDocumentContentChangeEvent> changes = params
 			.getContentChanges();
@@ -218,7 +194,6 @@ public class ApposePythonLanguageServer implements LanguageServer,
 
 	@Override
 	public void didClose(final DidCloseTextDocumentParams params) {
-		syntax.getTextDocumentService().didClose(params);
 		final Doc doc = docs.remove(params.getTextDocument().getUri());
 		if (doc == null) return;
 		synchronized (doc) {
@@ -237,15 +212,12 @@ public class ApposePythonLanguageServer implements LanguageServer,
 	public CompletableFuture<Either<List<CompletionItem>, CompletionList>>
 		completion(final CompletionParams params)
 	{
-		final CompletableFuture<CompletionList> own = orNull(syntax
-			.getTextDocumentService().completion(params)).thenApply(
-				ApposePythonLanguageServer::list);
-		final LanguageServer j = jedi(params.getTextDocument().getUri());
-		if (j == null) return own.thenApply(Either::forRight);
+		final String uri = params.getTextDocument().getUri();
+		final LanguageServer j = jedi(uri);
+		if (j == null) return CompletableFuture.completedFuture(Either.forRight(
+			new CompletionList()));
 		return orNull(j.getTextDocumentService().completion(params)).thenApply(
-			ApposePythonLanguageServer::list).thenCombine(own, (theirs,
-				mine) -> Either.forRight(merge(theirs, mine, params.getTextDocument()
-					.getUri())));
+			answer -> Either.forRight(mark(list(answer), uri)));
 	}
 
 	@Override
@@ -253,24 +225,16 @@ public class ApposePythonLanguageServer implements LanguageServer,
 		final CompletionItem item)
 	{
 		if (!(item.getData() instanceof Source)) {
-			// NB: Not merged (e.g. without jedi): the syntax server's.
-			return syntax.getTextDocumentService().resolveCompletionItem(item);
-		}
-		final Source from = (Source) item.getData();
-		final LanguageServer server = from.jedi ? jedi(from.uri) : syntax;
-		final String sortText = item.getSortText();
-		item.setData(from.data);
-		item.setSortText(from.sortText);
-		if (server == null) {
-			item.setData(from);
-			item.setSortText(sortText);
 			return CompletableFuture.completedFuture(item);
 		}
-		return orNull(server.getTextDocumentService().resolveCompletionItem(item))
+		final Source from = (Source) item.getData();
+		final LanguageServer j = jedi(from.uri);
+		if (j == null) return CompletableFuture.completedFuture(item);
+		item.setData(from.data);
+		return orNull(j.getTextDocumentService().resolveCompletionItem(item))
 			.thenApply(resolved -> {
 				final CompletionItem out = resolved != null ? resolved : item;
 				out.setData(from);
-				out.setSortText(sortText);
 				return out;
 			});
 	}
@@ -279,15 +243,16 @@ public class ApposePythonLanguageServer implements LanguageServer,
 	public CompletableFuture<SignatureHelp> signatureHelp(
 		final SignatureHelpParams params)
 	{
-		return first(params.getTextDocument().getUri(), s -> s.signatureHelp(
-			params), h -> h != null && h.getSignatures() != null && !h
-				.getSignatures().isEmpty());
+		final LanguageServer j = jedi(params.getTextDocument().getUri());
+		return j == null ? CompletableFuture.completedFuture(null) : orNull(j
+			.getTextDocumentService().signatureHelp(params));
 	}
 
 	@Override
 	public CompletableFuture<Hover> hover(final HoverParams params) {
-		return first(params.getTextDocument().getUri(), s -> s.hover(params),
-			h -> h != null && h.getContents() != null);
+		final LanguageServer j = jedi(params.getTextDocument().getUri());
+		return j == null ? CompletableFuture.completedFuture(null) : orNull(j
+			.getTextDocumentService().hover(params));
 	}
 
 	// -- WorkspaceService --
@@ -362,67 +327,18 @@ public class ApposePythonLanguageServer implements LanguageServer,
 		}
 	}
 
-	/** Asks jedi, then (if its answer is not accepted) the syntax server. */
-	private <T> CompletableFuture<T> first(final String uri,
-		final Function<TextDocumentService, CompletableFuture<T>> request,
-		final java.util.function.Predicate<T> accepted)
-	{
-		final LanguageServer j = jedi(uri);
-		final CompletableFuture<T> theirs = j == null ? CompletableFuture
-			.completedFuture(null) : orNull(request.apply(j
-				.getTextDocumentService()));
-		return theirs.thenCompose(t -> accepted.test(t) ? CompletableFuture
-			.completedFuture(t) : orNull(request.apply(syntax
-				.getTextDocumentService())));
-	}
-
 	/**
-	 * Jedi's completions, then the syntax server's whose names jedi has not
-	 * completed, each in its own order. Each remembers whose it is, for
-	 * resolving.
+	 * Marks each completion with its document, so that it is resolved by the
+	 * jedi analyzing it.
 	 */
-	private static CompletionList merge(final CompletionList theirs,
-		final CompletionList own, final String uri)
+	private static CompletionList mark(final CompletionList list,
+		final String uri)
 	{
-		final List<CompletionItem> out = new ArrayList<>();
-		final Set<String> names = new HashSet<>();
-		int i = 0;
-		for (final CompletionItem item : sorted(theirs)) {
-			names.add(name(item));
-			mark(item, true, uri, i++);
-			out.add(item);
+		if (list == null) return new CompletionList();
+		for (final CompletionItem item : list.getItems()) {
+			item.setData(new Source(uri, item.getData()));
 		}
-		for (final CompletionItem item : sorted(own)) {
-			if (names.contains(name(item))) continue;
-			mark(item, false, uri, i++);
-			out.add(item);
-		}
-		final boolean incomplete = theirs != null && theirs.isIncomplete() ||
-			own != null && own.isIncomplete();
-		return new CompletionList(incomplete, out);
-	}
-
-	private static void mark(final CompletionItem item, final boolean fromJedi,
-		final String uri, final int position)
-	{
-		item.setData(new Source(fromJedi, uri, item.getData(), item
-			.getSortText()));
-		item.setSortText(String.format("%d%06d", fromJedi ? 0 : 1, position));
-	}
-
-	private static List<CompletionItem> sorted(final CompletionList list) {
-		final List<CompletionItem> items = new ArrayList<>();
-		if (list != null && list.getItems() != null) items.addAll(list.getItems());
-		items.sort(Comparator.comparing(c -> c.getSortText() != null ? c
-			.getSortText() : c.getLabel()));
-		return items;
-	}
-
-	/** What a completion completes: its label, without any parameters. */
-	private static String name(final CompletionItem item) {
-		final String label = item.getLabel();
-		final int paren = label.indexOf('(');
-		return (paren < 0 ? label : label.substring(0, paren)).trim();
+		return list;
 	}
 
 	private static CompletionList list(
@@ -453,31 +369,24 @@ public class ApposePythonLanguageServer implements LanguageServer,
 		}
 	}
 
-	/** Remembers whose a merged completion is. */
+	/** Remembers which document a completion is of, for resolving. */
 	private static final class Source {
 
-		private final boolean jedi;
 		private final String uri;
 		private final Object data;
-		private final String sortText;
 
-		private Source(final boolean jedi, final String uri, final Object data,
-			final String sortText)
-		{
-			this.jedi = jedi;
+		private Source(final String uri, final Object data) {
 			this.uri = uri;
 			this.data = data;
-			this.sortText = sortText;
 		}
 	}
 
 	/**
-	 * Passes problems on to the client: jedi's, from the jedi analyzing their
-	 * document; or, without jedi, the syntax server's (none).
+	 * Passes the problems the jedi analyzing their document finds on to the
+	 * client; and its messages.
 	 */
 	private final class Forwarder implements LanguageClient {
 
-		/** The jedi, or null for the syntax server. */
 		private final LanguageServer source;
 
 		private Forwarder(final LanguageServer source) {
@@ -487,13 +396,8 @@ public class ApposePythonLanguageServer implements LanguageServer,
 		@Override
 		public void publishDiagnostics(final PublishDiagnosticsParams p) {
 			final LanguageClient c = client;
-			if (c == null) return;
-			if (source == null) {
-				if (jedi == null) c.publishDiagnostics(p);
-				return;
-			}
 			// NB: Only from the jedi analyzing the document now.
-			if (jedi(p.getUri()) == source) c.publishDiagnostics(p);
+			if (c != null && jedi(p.getUri()) == source) c.publishDiagnostics(p);
 		}
 
 		@Override

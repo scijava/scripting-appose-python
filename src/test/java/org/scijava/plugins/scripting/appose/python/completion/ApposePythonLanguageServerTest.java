@@ -75,9 +75,9 @@ import org.junit.Test;
 import org.scijava.code.lsp.Environment;
 
 /**
- * Tests {@link ApposePythonLanguageServer}, with fake servers: how it combines
- * jedi and the syntax-only server, and moves scripts between jedis as where
- * they run changes.
+ * Tests {@link ApposePythonLanguageServer}, with fake jedis: how it routes
+ * each script to the jedi of where it runs, and moves scripts between jedis
+ * as that changes.
  *
  * @author Gabriel Selzer
  */
@@ -93,12 +93,10 @@ public class ApposePythonLanguageServerTest {
 	/** Where scripts run when their text does not say (e.g. once built). */
 	private volatile String fallback = "A";
 
-	private Fake syntax;
 	private ApposePythonLanguageServer server;
 
 	@Before
 	public void setUp() {
-		syntax = new Fake("syntax", "max", "min");
 		server = server(env -> {
 			final Fake jedi = new Fake("jedi:" + env.interpreter(), "max", "map");
 			jedis.add(jedi);
@@ -136,40 +134,39 @@ public class ApposePythonLanguageServerTest {
 		assertEquals("jedi:C", jedis.get(3).name);
 		assertEquals(Collections.singletonList("open 4 y = 1"), jedis.get(3).events);
 
-		// Closed: on the syntax server and its jedi, which is let go.
+		// Closed: on its jedi, which is let go.
 		server.didClose(new DidCloseTextDocumentParams(new TextDocumentIdentifier(
 			URI)));
 		assertEquals(Arrays.asList("open 4 y = 1", "close", "shutdown"), jedis.get(
 			3).events);
-		assertEquals("close", syntax.events.get(syntax.events.size() - 1));
 	}
 
 	@Test
 	public void testCompletions() throws Exception {
 		open("ma");
 		final CompletionList list = complete();
-		// Jedi's, then the syntax server's for names jedi did not complete; each
-		// in its own order.
-		assertEquals(Arrays.asList("map", "max", "min"), labels(list));
+		// Jedi's, as they are.
+		assertEquals(Arrays.asList("max", "map"), labels(list));
 
-		// Resolved by the server each came from, with its own data.
-		final CompletionItem min = list.getItems().get(2);
-		final Object marker = min.getData();
-		final CompletionItem resolved = server.resolveCompletionItem(min).get(10,
+		// Resolved by the jedi analyzing the script, with its own data.
+		final CompletionItem max = list.getItems().get(0);
+		final Object marker = max.getData();
+		final CompletionItem resolved = server.resolveCompletionItem(max).get(10,
 			TimeUnit.SECONDS);
-		assertEquals("syntax resolved min (data syntax)", resolved.getDetail());
+		assertEquals("jedi:A resolved max (data jedi:A)", resolved.getDetail());
 		assertEquals(marker, resolved.getData());
-		assertEquals("jedi:A resolved map (data jedi:A)", server
-			.resolveCompletionItem(list.getItems().get(0)).get(10, TimeUnit.SECONDS)
-			.getDetail());
+
+		// Moved: resolved by the jedi analyzing it now.
+		change("#env=B\nma", 2);
+		assertEquals("jedi:B resolved max (data jedi:B)", server
+			.resolveCompletionItem(complete().getItems().get(0)).get(10,
+				TimeUnit.SECONDS).getDetail());
 	}
 
 	@Test
 	public void testDiagnostics() {
 		open("x = 1");
 		final Fake a = jedis.get(0);
-		// The syntax server's are not passed on (jedi's are the problems).
-		syntax.publish(URI, 1, "syntax");
 		a.publish(URI, 1, "from A");
 		assertEquals(Collections.singletonList("from A"), messages());
 
@@ -180,27 +177,12 @@ public class ApposePythonLanguageServerTest {
 		assertEquals(Arrays.asList("from A", "from B"), messages());
 	}
 
-	@Test
-	public void testWithoutJedi() throws Exception {
-		server = server(null);
-		open("ma");
-		// The syntax server's answers, as they are.
-		final CompletionList list = complete();
-		assertEquals(Arrays.asList("max", "min"), labels(list));
-		assertEquals("syntax", list.getItems().get(0).getData());
-		assertEquals("syntax resolved max (data syntax)", server
-			.resolveCompletionItem(list.getItems().get(0)).get(10, TimeUnit.SECONDS)
-			.getDetail());
-		syntax.publish(URI, 1, "syntax");
-		assertEquals(Collections.singletonList("syntax"), messages());
-	}
-
 	// -- Helper methods --
 
 	private ApposePythonLanguageServer server(
 		final Function<Environment, LanguageServer> jedi)
 	{
-		final ApposePythonLanguageServer s = new ApposePythonLanguageServer(syntax,
+		final ApposePythonLanguageServer s = new ApposePythonLanguageServer(
 			doc -> new Environment(doc.getText().contains("#env=B") ? "B"
 				: fallback, null, null), jedi, null);
 		s.connect(new Client());
