@@ -96,8 +96,6 @@
 		<scijava-common.version>2.101.0</scijava-common.version>
 
 		<scijava-code-lsp.version>0.1.0-SNAPSHOT</scijava-code-lsp.version>
-		<tree-sitter.version>0.26.6</tree-sitter.version>
-		<tree-sitter-python.version>0.25.0</tree-sitter-python.version>
 	</properties>
 
 	<dependencies>
@@ -117,17 +115,6 @@
 		</dependency>
 
 		<!-- Third-party dependencies -->
-		<dependency>
-			<!-- NB: Parses Python for code completion. -->
-			<groupId>io.github.bonede</groupId>
-			<artifactId>tree-sitter</artifactId>
-			<version>${tree-sitter.version}</version>
-		</dependency>
-		<dependency>
-			<groupId>io.github.bonede</groupId>
-			<artifactId>tree-sitter-python</artifactId>
-			<version>${tree-sitter-python.version}</version>
-		</dependency>
 		<dependency>
 			<groupId>com.fasterxml.jackson.core</groupId>
 			<artifactId>jackson-databind</artifactId>

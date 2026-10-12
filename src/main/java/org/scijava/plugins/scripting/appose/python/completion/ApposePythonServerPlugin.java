@@ -44,16 +44,15 @@ import org.scijava.script.ScriptLanguage;
 
 /**
  * Offers the language server of Python scripts run via Appose (see
- * {@link ApposePythonLanguageServer}): the syntax-only server, and, if offered
- * (see {@link JediServerProcessPlugin}), jedi-language-server: members of
- * objects and modules, signatures, documentation, hover and syntax errors.
- * Once a script's environment is built (by running the script), jedi
- * analyzes the script against it, so its packages are known; packages the
- * script declares but its environment lacks are installed for completion only
- * (see {@link DependencyOverlays}).
- * Both see the script as plain Python, its parameters declared with the
- * types they have when it runs (e.g. images as NumPy arrays; see
- * {@link #dialect()}).
+ * {@link ApposePythonLanguageServer}): jedi-language-server (see
+ * {@link JediServerProcessPlugin}), for members of objects and modules,
+ * signatures, documentation, hover and syntax errors. Once a script's
+ * environment is built (by running the script), jedi analyzes the script
+ * against it, so its packages are known; packages the script declares but its
+ * environment lacks are installed for completion only (see
+ * {@link DependencyOverlays}). Jedi sees the script as plain Python, its
+ * parameters declared with the types they have when it runs (e.g. images as
+ * NumPy arrays; see {@link #dialect()}).
  * <p>
  * Completion never builds a script's environment, and never disturbs its
  * worker.
@@ -78,15 +77,14 @@ public class ApposePythonServerPlugin implements LanguageServerPlugin {
 
 	@Override
 	public boolean supports(final ScriptLanguage language) {
-		return language instanceof ApposePythonScriptLanguage;
+		// NB: Without jedi, there is nothing to serve.
+		return language instanceof ApposePythonScriptLanguage && jediOffered();
 	}
 
 	@Override
 	public LanguageServer create(final Environment environment) {
-		final boolean jedi = jediOffered();
-		return new ApposePythonLanguageServer(new PythonSyntaxLanguageServer(),
-			this::environment, jedi ? this::jedi : null, ApposePythonEnvironments.of(
-				workers));
+		return new ApposePythonLanguageServer(this::environment, this::jedi,
+			ApposePythonEnvironments.of(workers));
 	}
 
 	@Override

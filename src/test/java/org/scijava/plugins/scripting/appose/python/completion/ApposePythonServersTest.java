@@ -30,7 +30,6 @@
 package org.scijava.plugins.scripting.appose.python.completion;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -38,12 +37,9 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 import net.imglib2.img.Img;
 
-import org.eclipse.lsp4j.CompletionItem;
 import org.eclipse.lsp4j.TextDocumentItem;
 import org.junit.After;
 import org.junit.Before;
@@ -52,7 +48,6 @@ import org.scijava.Context;
 import org.scijava.code.lsp.LanguageServerService;
 import org.scijava.code.lsp.Environment;
 import org.scijava.code.lsp.LanguageServerPlugin;
-import org.scijava.code.lsp.ScriptSession;
 import org.scijava.code.lsp.ScriptDocument;
 import org.scijava.plugin.PluginService;
 import org.scijava.plugins.scripting.appose.python.ScriptEnvironment;
@@ -61,10 +56,9 @@ import org.scijava.script.ScriptLanguage;
 import org.scijava.script.ScriptService;
 
 /**
- * Tests the language servers of Python scripts run via Appose, without
- * starting any server process: the syntax-only server
- * ({@link PythonSyntaxLanguageServer}), and what {@link ApposePythonServerPlugin}
- * tells jedi-language-server (the script as plain Python, and where it runs).
+ * Tests what {@link ApposePythonServerPlugin} tells jedi-language-server about
+ * Python scripts run via Appose (the script as plain Python, and where it
+ * runs), without starting any server process.
  *
  * @author Gabriel Selzer
  */
@@ -103,29 +97,6 @@ public class ApposePythonServersTest {
 			language));
 		// NB: Here, appose-python offers the Python server itself.
 		assertTrue(plugin.jediOffered());
-	}
-
-	@Test
-	public void testLocalCompletions() {
-		final String header = "#@ net.imglib2.img.Img image\n#@ double sigma\n";
-		final List<String> names = complete(header +
-			"def blur(img, s):\n    result = img\n    re");
-		assertTrue(names.toString(), names.contains("result"));
-		assertTrue(names.contains("return"));
-		assertTrue(complete(header + "x = si").contains("sigma"));
-		assertTrue(complete(header + "pri").contains("print"));
-		assertTrue(complete(header + "ta").contains("task"));
-		// Declared with the types they have when the script runs.
-		assertEquals("float", detail(header + "x = si", "sigma"));
-		assertEquals("numpy.ndarray", detail(header + "x = ima", "image"));
-		assertEquals("appose.python_worker.Task", detail(header + "ta", "task"));
-		// Modules imported only to declare those: not completed.
-		assertFalse(complete(header + "nu").contains("numpy"));
-		assertFalse(complete(header + "ap").contains("appose"));
-		assertTrue(complete(header + "import numpy\nnu").contains("numpy"));
-		// Nothing on parameter lines, in strings or comments.
-		assertTrue(complete("#@ String na").isEmpty());
-		assertTrue(complete("s = 'pri").isEmpty());
 	}
 
 	@Test
@@ -315,30 +286,6 @@ public class ApposePythonServersTest {
 	private ScriptDocument document(final String code) {
 		return ScriptDocument.of(code, context.service(LanguageServerService.class)
 			.scriptParameters(code), plugin.dialect());
-	}
-
-	/** Completes with the syntax-only server. */
-	private List<String> complete(final String code) {
-		return items(code).stream().map(CompletionItem::getLabel).collect(
-			Collectors.toList());
-	}
-
-	/** The detail of a completion with the syntax-only server, or null. */
-	private String detail(final String code, final String label) {
-		return items(code).stream().filter(i -> i.getLabel().equals(label))
-			.findFirst().map(CompletionItem::getDetail).orElse(null);
-	}
-
-	private List<CompletionItem> items(final String code) {
-		try (ScriptSession session = ScriptSession.owning(
-			new PythonSyntaxLanguageServer(), language, this::document))
-		{
-			return session.completion(code, code.length()).get(10,
-				TimeUnit.SECONDS).getItems();
-		}
-		catch (final Exception exc) {
-			throw new RuntimeException(exc);
-		}
 	}
 
 	private static void delete(final java.nio.file.Path dir) throws Exception {
