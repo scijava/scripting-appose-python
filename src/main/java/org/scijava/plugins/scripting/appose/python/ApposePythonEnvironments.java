@@ -53,7 +53,6 @@ import org.scijava.plugins.scripting.appose.python._internal.ResidentWorker;
 import org.scijava.plugins.scripting.appose.python._internal.BuildListener;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerService;
 import org.scijava.plugins.scripting.appose.python.completion.DependencyOverlays;
-import org.scijava.plugins.scripting.appose.python.completion.JediLanguageServerSpec;
 
 /**
  * Where Python scripts run via Appose, as their language servers need to
@@ -356,21 +355,17 @@ final class ApposePythonEnvironments {
 	}
 
 	/**
-	 * How to start jedi-language-server: with the Python of the tooling
-	 * environment, built first if needed (but starting no worker).
+	 * Gets the Python of the tooling environment, in which jedi-language-server
+	 * runs (see {@link JediServerProcessPlugin}): built first if needed (but
+	 * starting no worker).
 	 */
-	static JediLanguageServerSpec serverSpec(
-		final ResidentWorkerService workers)
+	static String toolingPython(final ResidentWorkerService workers)
+		throws Exception
 	{
-		final File envs = new File(Environments.apposeEnvsDir());
-		return new JediLanguageServerSpec(() -> {
-			final String python = pythonExecutable(toolingWorker(workers)
-				.environment().get());
-			if (python == null) throw new IOException("No Python in " +
-				TOOLING_ENV);
-			return python;
-		}, new File(envs, TOOLING_ENV + "-workspace"), new File(envs, TOOLING_ENV +
-			"-server.log"));
+		final String python = pythonExecutable(toolingWorker(workers).environment()
+			.get());
+		if (python == null) throw new IOException("No Python in " + TOOLING_ENV);
+		return python;
 	}
 
 	/** Gets the tooling environment's worker, building it first if needed. */

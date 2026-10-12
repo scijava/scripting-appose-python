@@ -45,7 +45,7 @@ import org.scijava.script.ScriptLanguage;
 /**
  * Offers the language server of Python scripts run via Appose (see
  * {@link ApposePythonLanguageServer}): the syntax-only server, and, if offered
- * (see {@link ApposePythonLspServerPlugin}), jedi-language-server: members of
+ * (see {@link JediServerProcessPlugin}), jedi-language-server: members of
  * objects and modules, signatures, documentation, hover and syntax errors.
  * Once a script's environment is built (by running the script), jedi
  * analyzes the script against it, so its packages are known; packages the

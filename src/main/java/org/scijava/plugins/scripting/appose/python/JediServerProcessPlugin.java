@@ -27,7 +27,7 @@
  * #L%
  */
 
-package org.scijava.plugins.scripting.appose.python.completion;
+package org.scijava.plugins.scripting.appose.python;
 
 import java.io.File;
 import java.io.IOException;
@@ -35,18 +35,24 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.Callable;
 
+import org.apposed.appose.util.Environments;
 import org.scijava.code.lsp.Environment;
-import org.scijava.code.lsp.launch.LspConnection;
-import org.scijava.code.lsp.launch.LspServerSpec;
+import org.scijava.code.lsp.ServerProcessPlugin;
+import org.scijava.plugin.Parameter;
+import org.scijava.plugin.Plugin;
+import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerService;
 
 /**
- * Starts jedi-language-server, with the Python of a tooling environment, to
- * analyze scripts against their environment's Python (if known) and extra
- * search paths (e.g. a dependency overlay).
+ * Offers jedi-language-server, for {@code python}: run with the Python of a
+ * tooling environment (see {@link ApposePythonEnvironments}), to analyze
+ * scripts against their environment's Python (if known) and extra search
+ * paths (e.g. a dependency overlay). Python scripts run via Appose use it,
+ * and so do Jython's.
  *
  * @author Gabriel Selzer
  */
-public class JediLanguageServerSpec implements LspServerSpec {
+@Plugin(type = ServerProcessPlugin.class, name = "jedi-language-server")
+public class JediServerProcessPlugin implements ServerProcessPlugin {
 
 	/**
 	 * Runs jedi-language-server, exiting once the given process (this JVM) is
@@ -72,9 +78,21 @@ public class JediLanguageServerSpec implements LspServerSpec {
 	/** How large the error log may grow before it is started anew, in bytes. */
 	private static final long MAX_LOG = 5 * 1024 * 1024;
 
+	@Parameter
+	private ResidentWorkerService workers;
+
 	private final Callable<String> python;
 	private final File workspace;
 	private final File log;
+
+	/** Runs the server in the tooling environment, building it if needed. */
+	public JediServerProcessPlugin() {
+		final File envs = new File(Environments.apposeEnvsDir());
+		python = () -> ApposePythonEnvironments.toolingPython(workers);
+		workspace = new File(envs, ApposePythonEnvironments.TOOLING_ENV +
+			"-workspace");
+		log = new File(envs, ApposePythonEnvironments.TOOLING_ENV + "-server.log");
+	}
 
 	/**
 	 * @param python Gets the Python executable of the environment
@@ -82,8 +100,8 @@ public class JediLanguageServerSpec implements LspServerSpec {
 	 * @param workspace An (empty) directory to serve as workspace root.
 	 * @param log Where to append the server's error output.
 	 */
-	public JediLanguageServerSpec(final Callable<String> python,
-		final File workspace, final File log)
+	JediServerProcessPlugin(final Callable<String> python, final File workspace,
+		final File log)
 	{
 		this.python = python;
 		this.workspace = workspace;
@@ -96,7 +114,7 @@ public class JediLanguageServerSpec implements LspServerSpec {
 	}
 
 	@Override
-	public LspConnection start(final Environment env)
+	public Process start(final Environment env)
 		throws IOException
 	{
 		final String exe;
@@ -116,7 +134,7 @@ public class JediLanguageServerSpec implements LspServerSpec {
 		final ProcessBuilder pb = new ProcessBuilder(exe, "-c", LAUNCHER, String
 			.valueOf(ProcessHandle.current().pid()));
 		pb.redirectError(ProcessBuilder.Redirect.appendTo(log));
-		return LspConnection.of(pb.start());
+		return pb.start();
 	}
 
 	@Override

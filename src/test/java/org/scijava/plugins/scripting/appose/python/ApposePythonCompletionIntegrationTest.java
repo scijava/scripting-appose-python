@@ -212,7 +212,7 @@ public class ApposePythonCompletionIntegrationTest {
 		final Process gone = new ProcessBuilder(python, "-c", "pass").start();
 		gone.waitFor();
 		final Process process = new ProcessBuilder(python, "-c",
-			org.scijava.plugins.scripting.appose.python.completion.JediLanguageServerSpec.LAUNCHER,
+			JediServerProcessPlugin.LAUNCHER,
 			String.valueOf(gone.pid())).redirectErrorStream(true).start();
 		final boolean exited = process.waitFor(30, TimeUnit.SECONDS);
 		if (!exited) process.destroyForcibly();
