@@ -58,7 +58,6 @@ import org.scijava.plugin.PluginService;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerService;
 import org.scijava.plugins.scripting.appose.python.completion.ApposePythonDialect;
 import org.scijava.plugins.scripting.appose.python.completion.DependencyOverlays;
-import org.scijava.plugins.scripting.appose.python.completion.JediLanguageServerSpec;
 import org.scijava.script.ScriptLanguage;
 import org.scijava.script.ScriptService;
 
@@ -293,7 +292,7 @@ public class ApposePythonServersTest {
 
 	@Test
 	public void testServerOptions() {
-		final JediLanguageServerSpec spec = new JediLanguageServerSpec(() -> null,
+		final JediServerProcessPlugin spec = new JediServerProcessPlugin(() -> null,
 			new File("workspace"), new File("server.log"));
 		assertEquals("python", spec.languageId());
 		final String diagnostics = "diagnostics={enable=true, didOpen=true, " +

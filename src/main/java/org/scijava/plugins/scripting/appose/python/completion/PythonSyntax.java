@@ -53,7 +53,8 @@ import org.treesitter.TreeSitterPython;
  * <p>
  * This needs no Python, so it works instantly, before (or without) any Appose
  * environment. It knows nothing of types, though: members of objects come
- * from the language server (see {@link org.scijava.code.lsp.PythonLspClient}).
+ * from jedi-language-server (see
+ * {@link org.scijava.plugins.scripting.appose.python.ApposePythonLanguageServer}).
  * </p>
  *
  * @author Gabriel Selzer
