@@ -36,15 +36,15 @@ import static org.junit.Assert.assertTrue;
 import java.util.List;
 
 import org.junit.Test;
-import org.scijava.plugins.scripting.appose.python.completion.PythonSyntax.Context;
-import org.scijava.plugins.scripting.appose.python.completion.PythonSyntax.Kind;
+import org.scijava.plugins.scripting.appose.python.completion.PythonSyntaxLanguageServer.Context;
+import org.scijava.plugins.scripting.appose.python.completion.PythonSyntaxLanguageServer.Kind;
 
 /**
- * Tests {@link PythonSyntax}.
+ * Tests how {@link PythonSyntaxLanguageServer} analyzes scripts.
  *
  * @author Gabriel Selzer
  */
-public class PythonSyntaxTest {
+public class PythonSyntaxLanguageServerTest {
 
 	@Test
 	public void testNamesInScope() {
@@ -54,7 +54,7 @@ public class PythonSyntaxTest {
 			"def f(a, b=2, *args, c: int = 3, **kw):\n" + //
 			"    loc = 3\n" + //
 			"    lo";
-		final List<String> names = PythonSyntax.names(code, code.length());
+		final List<String> names = PythonSyntaxLanguageServer.names(code, code.length());
 		for (final String name : new String[] { "loc", "a", "b", "args", "c", "kw",
 			"f", "x", "np", "os", "p", "sep" })
 		{
@@ -62,52 +62,52 @@ public class PythonSyntaxTest {
 		}
 		// Innermost scope first.
 		assertTrue(names.indexOf("loc") < names.indexOf("x"));
-		assertFalse(names.contains(PythonSyntax.CARET));
+		assertFalse(names.contains(PythonSyntaxLanguageServer.CARET));
 	}
 
 	@Test
 	public void testScopeRules() {
 		// Class bodies are not visible from their methods.
 		final String cls = "class C:\n    attr = 1\n    def m(self):\n        at";
-		final List<String> inMethod = PythonSyntax.names(cls, cls.length());
+		final List<String> inMethod = PythonSyntaxLanguageServer.names(cls, cls.length());
 		assertTrue(inMethod.contains("self"));
 		assertTrue(inMethod.contains("C"));
 		assertFalse(inMethod.contains("attr"));
 		// Functions' locals are not visible outside them.
 		final String fn = "def g():\n    inner = 1\nin";
-		assertFalse(PythonSyntax.names(fn, fn.length()).contains("inner"));
+		assertFalse(PythonSyntaxLanguageServer.names(fn, fn.length()).contains("inner"));
 		// Comprehension, with, except and walrus targets.
 		final String comp = "[val for val in range(3) if va";
-		assertTrue(PythonSyntax.names(comp, comp.length()).contains("val"));
+		assertTrue(PythonSyntaxLanguageServer.names(comp, comp.length()).contains("val"));
 		final String blocks = "with open(f) as fh:\n    try:\n        pass\n" +
 			"    except E as err:\n        if (n := 2):\n            e";
-		final List<String> names = PythonSyntax.names(blocks, blocks.length());
+		final List<String> names = PythonSyntaxLanguageServer.names(blocks, blocks.length());
 		assertTrue(names.toString(), names.contains("fh") && names.contains(
 			"err") && names.contains("n"));
 		// Unclosed brackets before the caret.
 		final String open = "def h(alpha):\n    print(1, [2, al";
-		assertTrue(PythonSyntax.names(open, open.length()).contains("alpha"));
+		assertTrue(PythonSyntaxLanguageServer.names(open, open.length()).contains("alpha"));
 	}
 
 	@Test
 	public void testAttributeContext() {
 		final String code = "import numpy as np\nnp.random.ra";
-		final Context ctx = PythonSyntax.analyze(code, code.length());
+		final Context ctx = PythonSyntaxLanguageServer.analyze(code, code.length());
 		assertEquals(Kind.ATTRIBUTE, ctx.kind);
 		assertEquals("np.random", ctx.receiver);
 		assertEquals("ra", ctx.prefix);
 		assertEquals(code.length() - 2, ctx.replaceStart);
-		assertEquals("foo(x)[0]", PythonSyntax.analyze("y = foo(x)[0].", 14)
+		assertEquals("foo(x)[0]", PythonSyntaxLanguageServer.analyze("y = foo(x)[0].", 14)
 			.receiver);
 		// Attributes used elsewhere on the same receiver.
 		final String img = "img.shape\nimg.dtype\nmyimg.size\nimg.sh";
-		final Context used = PythonSyntax.analyze(img, img.length());
+		final Context used = PythonSyntaxLanguageServer.analyze(img, img.length());
 		assertTrue(used.attributesUsed.contains("shape"));
 		assertTrue(used.attributesUsed.contains("dtype"));
 		assertFalse(used.attributesUsed.contains("size"));
 		// A dot ending a line is not followed by an attribute on the next one.
 		final String nextLine = "a = numpy.ndarray(3)\na.\nprint(a.shape)\n";
-		final Context dot = PythonSyntax.analyze(nextLine, nextLine.indexOf(
+		final Context dot = PythonSyntaxLanguageServer.analyze(nextLine, nextLine.indexOf(
 			"a.\n") + 2);
 		assertTrue(dot.attributesUsed.contains("shape"));
 		assertFalse(dot.attributesUsed.toString(), dot.attributesUsed.contains(
@@ -120,26 +120,26 @@ public class PythonSyntaxTest {
 			"x = 1  # np.", "d = \"\"\"doc\nmore np.", "#@ String na", "x = 1.",
 			"f\"{x}.y" })
 		{
-			assertEquals(code, Kind.NONE, PythonSyntax.analyze(code, code.length())
+			assertEquals(code, Kind.NONE, PythonSyntaxLanguageServer.analyze(code, code.length())
 				.kind);
 		}
 		// But after a closed string, completion works again.
 		final String closed = "s = 'a.b'\nx = s.up";
-		assertEquals(Kind.ATTRIBUTE, PythonSyntax.analyze(closed, closed.length())
+		assertEquals(Kind.ATTRIBUTE, PythonSyntaxLanguageServer.analyze(closed, closed.length())
 			.kind);
 	}
 
 	@Test
 	public void testImports() {
-		assertEquals(Kind.IMPORT, PythonSyntax.analyze("import nu", 9).kind);
-		assertEquals(Kind.IMPORT, PythonSyntax.analyze("from scipy.nd", 13).kind);
-		assertEquals(Kind.IMPORT, PythonSyntax.analyze(
+		assertEquals(Kind.IMPORT, PythonSyntaxLanguageServer.analyze("import nu", 9).kind);
+		assertEquals(Kind.IMPORT, PythonSyntaxLanguageServer.analyze("from scipy.nd", 13).kind);
+		assertEquals(Kind.IMPORT, PythonSyntaxLanguageServer.analyze(
 			"from scipy import ndim", 22).kind);
 	}
 
 	@Test
 	public void testUnicode() {
 		final String code = "s = '\u00e9t\u00e9'\nvaleur = 1\nval";
-		assertTrue(PythonSyntax.names(code, code.length()).contains("valeur"));
+		assertTrue(PythonSyntaxLanguageServer.names(code, code.length()).contains("valeur"));
 	}
 }

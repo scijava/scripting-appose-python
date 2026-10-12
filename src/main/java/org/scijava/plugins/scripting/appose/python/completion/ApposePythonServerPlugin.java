@@ -50,8 +50,7 @@ import org.scijava.script.ScriptLanguage;
  * Once a script's environment is built (by running the script), jedi
  * analyzes the script against it, so its packages are known; packages the
  * script declares but its environment lacks are installed for completion only
- * (see
- * {@link org.scijava.plugins.scripting.appose.python.completion.DependencyOverlays}).
+ * (see {@link DependencyOverlays}).
  * Both see the script as plain Python, its parameters declared with the
  * types they have when it runs (e.g. images as NumPy arrays; see
  * {@link #dialect()}).
@@ -68,6 +67,8 @@ public class ApposePythonServerPlugin implements LanguageServerPlugin {
 
 	/** How many completions get signatures, once a word is begun. */
 	private static final int SIGNATURES = 30;
+
+	private static final ApposePythonDialect DIALECT = new ApposePythonDialect();
 
 	@Parameter
 	private LanguageServerService servers;
@@ -90,7 +91,7 @@ public class ApposePythonServerPlugin implements LanguageServerPlugin {
 
 	@Override
 	public ScriptDialect dialect() {
-		return PythonSyntaxLanguageServer.DIALECT;
+		return DIALECT;
 	}
 
 	/** Whether jedi-language-server is offered. */
