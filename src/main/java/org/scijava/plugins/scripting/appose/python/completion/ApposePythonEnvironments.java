@@ -27,7 +27,7 @@
  * #L%
  */
 
-package org.scijava.plugins.scripting.appose.python;
+package org.scijava.plugins.scripting.appose.python.completion;
 
 import java.io.File;
 import java.io.IOException;
@@ -48,11 +48,11 @@ import org.apposed.appose.Appose;
 import org.apposed.appose.Environment;
 import org.apposed.appose.Service;
 import org.apposed.appose.util.Environments;
+import org.scijava.plugins.scripting.appose.python.ScriptEnvironment;
 import org.scijava.plugins.scripting.appose.python._internal.InlineMetadata;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorker;
 import org.scijava.plugins.scripting.appose.python._internal.BuildListener;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerService;
-import org.scijava.plugins.scripting.appose.python.completion.DependencyOverlays;
 
 /**
  * Where Python scripts run via Appose, as their language servers need to
@@ -227,7 +227,7 @@ final class ApposePythonEnvironments {
 		inputs.put("overlay", dir.getAbsolutePath());
 		try {
 			final Service.Task task = toolingWorker(workers).task(resource(
-				"completion/overlay.py"), inputs);
+				"overlay.py"), inputs);
 			task.waitFor();
 			final Object overlay = task.outputs.get("path");
 			return overlay instanceof String ? (String) overlay : null;

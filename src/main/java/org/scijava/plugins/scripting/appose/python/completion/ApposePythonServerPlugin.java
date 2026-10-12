@@ -27,7 +27,7 @@
  * #L%
  */
 
-package org.scijava.plugins.scripting.appose.python;
+package org.scijava.plugins.scripting.appose.python.completion;
 
 import org.eclipse.lsp4j.TextDocumentItem;
 import org.eclipse.lsp4j.services.LanguageServer;
@@ -38,8 +38,8 @@ import org.scijava.code.lsp.LanguageServerService;
 import org.scijava.code.lsp.ScriptDialect;
 import org.scijava.plugin.Parameter;
 import org.scijava.plugin.Plugin;
+import org.scijava.plugins.scripting.appose.python.ApposePythonScriptLanguage;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerService;
-import org.scijava.plugins.scripting.appose.python.completion.PythonCompletionServer;
 import org.scijava.script.ScriptLanguage;
 
 /**

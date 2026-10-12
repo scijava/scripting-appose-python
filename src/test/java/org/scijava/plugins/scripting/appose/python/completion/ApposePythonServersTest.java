@@ -27,7 +27,7 @@
  * #L%
  */
 
-package org.scijava.plugins.scripting.appose.python;
+package org.scijava.plugins.scripting.appose.python.completion;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -55,9 +55,8 @@ import org.scijava.code.lsp.LanguageServerPlugin;
 import org.scijava.code.lsp.ScriptSession;
 import org.scijava.code.lsp.ScriptDocument;
 import org.scijava.plugin.PluginService;
+import org.scijava.plugins.scripting.appose.python.ScriptEnvironment;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerService;
-import org.scijava.plugins.scripting.appose.python.completion.ApposePythonDialect;
-import org.scijava.plugins.scripting.appose.python.completion.DependencyOverlays;
 import org.scijava.script.ScriptLanguage;
 import org.scijava.script.ScriptService;
 

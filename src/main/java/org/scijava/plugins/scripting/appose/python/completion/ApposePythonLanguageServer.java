@@ -27,7 +27,7 @@
  * #L%
  */
 
-package org.scijava.plugins.scripting.appose.python;
+package org.scijava.plugins.scripting.appose.python.completion;
 
 import java.util.ArrayList;
 import java.util.Collections;
