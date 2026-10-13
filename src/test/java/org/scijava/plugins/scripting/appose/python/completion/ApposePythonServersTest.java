@@ -113,7 +113,7 @@ public class ApposePythonServersTest {
 	@Test
 	public void testEnvironmentWithoutOne() {
 		// No script environment has been built: the server's own Python.
-		final Environment env = plugin.environment(new TextDocumentItem(
+		final Environment env = environments.environment(new TextDocumentItem(
 			"untitled:/a.py", "appose-python", 2, "import os\nos.pa"));
 		assertNull(env.interpreter());
 		assertTrue(env.paths().isEmpty());
@@ -134,13 +134,13 @@ public class ApposePythonServersTest {
 			"appose-python", 1, code);
 		// On opening the script, its dependencies are settled: the overlay is
 		// installed; once ready, the server searches it.
-		plugin.environment(doc);
+		environments.environment(doc);
 		for (int i = 0; i < 100 && installed.isEmpty(); i++) Thread.sleep(20);
 		Thread.sleep(50);
 		assertEquals(Collections.singletonList(Collections.singletonList(
 			"tifffile")), installed);
-		assertEquals(Collections.singletonList("/overlays/blur"), plugin.environment(
-			doc).paths());
+		assertEquals(Collections.singletonList("/overlays/blur"), environments
+			.environment(doc).paths());
 	}
 
 	@Test
@@ -149,10 +149,10 @@ public class ApposePythonServersTest {
 		// it, even as its metadata is edited.
 		final String script = "# /// script\n# dependencies = [\"appose\"]\n" +
 			"# ///\nimport os\nos.pa";
-		plugin.environment(new TextDocumentItem("untitled:/a.py", "appose-python", 2,
-			script));
-		plugin.environment(new TextDocumentItem("untitled:/a.py", "appose-python", 3,
-			script.replace("appose", "appose, numpy")));
+		environments.environment(new TextDocumentItem("untitled:/a.py",
+			"appose-python", 2, script));
+		environments.environment(new TextDocumentItem("untitled:/a.py",
+			"appose-python", 3, script.replace("appose", "appose, numpy")));
 		assertTrue(context.service(ResidentWorkerService.class).workers()
 			.isEmpty());
 	}
@@ -176,7 +176,7 @@ public class ApposePythonServersTest {
 			java.nio.file.Files.createDirectories(python.getParent());
 			java.nio.file.Files.createFile(python);
 
-			final Environment env = plugin.environment(new TextDocumentItem(script
+			final Environment env = environments.environment(new TextDocumentItem(script
 				.toURI().toString(), "appose-python", 2, header + "numpy.ze"));
 			// The server analyzes against the environment's Python...
 			assertEquals(python.toFile().getAbsolutePath(), env.interpreter());

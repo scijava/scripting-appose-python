@@ -30,6 +30,9 @@
 package org.scijava.plugins.scripting.appose.python.completion;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -38,13 +41,12 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.eclipse.lsp4j.CompletionItem;
+import org.eclipse.lsp4j.CompletionItemKind;
 import org.eclipse.lsp4j.CompletionList;
 import org.eclipse.lsp4j.CompletionParams;
-import org.eclipse.lsp4j.Diagnostic;
 import org.eclipse.lsp4j.DidChangeConfigurationParams;
 import org.eclipse.lsp4j.DidChangeTextDocumentParams;
 import org.eclipse.lsp4j.DidChangeWatchedFilesParams;
@@ -53,31 +55,22 @@ import org.eclipse.lsp4j.DidOpenTextDocumentParams;
 import org.eclipse.lsp4j.DidSaveTextDocumentParams;
 import org.eclipse.lsp4j.InitializeParams;
 import org.eclipse.lsp4j.InitializeResult;
-import org.eclipse.lsp4j.MessageActionItem;
-import org.eclipse.lsp4j.MessageParams;
 import org.eclipse.lsp4j.Position;
-import org.eclipse.lsp4j.PublishDiagnosticsParams;
-import org.eclipse.lsp4j.Range;
 import org.eclipse.lsp4j.ServerCapabilities;
-import org.eclipse.lsp4j.ShowMessageRequestParams;
 import org.eclipse.lsp4j.TextDocumentContentChangeEvent;
 import org.eclipse.lsp4j.TextDocumentIdentifier;
 import org.eclipse.lsp4j.TextDocumentItem;
 import org.eclipse.lsp4j.VersionedTextDocumentIdentifier;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
-import org.eclipse.lsp4j.services.LanguageClient;
-import org.eclipse.lsp4j.services.LanguageClientAware;
 import org.eclipse.lsp4j.services.LanguageServer;
 import org.eclipse.lsp4j.services.TextDocumentService;
 import org.eclipse.lsp4j.services.WorkspaceService;
-import org.junit.Before;
 import org.junit.Test;
-import org.scijava.code.lsp.Environment;
+import org.scijava.code.lsp.jvm.Callable;
+import org.scijava.code.lsp.Positions;
 
 /**
- * Tests {@link ApposePythonLanguageServer}, with fake jedis: how it routes
- * each script to the jedi of where it runs, and moves scripts between jedis
- * as that changes.
+ * Tests {@link ApposePythonLanguageServer}, around a fake Python server.
  *
  * @author Gabriel Selzer
  */
@@ -85,191 +78,17 @@ public class ApposePythonLanguageServerTest {
 
 	private static final String URI = "untitled:/a.py";
 
-	/** The jedis started, in order. */
-	private final List<Fake> jedis = new CopyOnWriteArrayList<>();
-	private final List<PublishDiagnosticsParams> published =
-		new CopyOnWriteArrayList<>();
-
-	/** Where scripts run when their text does not say (e.g. once built). */
-	private volatile String fallback = "A";
-
-	private ApposePythonLanguageServer server;
-
-	@Before
-	public void setUp() {
-		server = server(env -> {
-			final Fake jedi = new Fake("jedi:" + env.interpreter(), "max", "map");
-			jedis.add(jedi);
-			return jedi;
-		});
-	}
-
-	@Test
-	public void testRelocation() {
-		open("x = 1");
-		assertEquals(1, jedis.size());
-		assertEquals(Collections.singletonList("open 1 x = 1"), jedis.get(0).events);
-
-		// Its text says it runs elsewhere: it moves to a jedi there.
-		change("#env=B\nx = 1", 2);
-		assertEquals(Arrays.asList("open 1 x = 1", "close", "shutdown"), jedis.get(
-			0).events);
-		assertEquals("jedi:B", jedis.get(1).name);
-		assertEquals(Collections.singletonList("open 2 #env=B\nx = 1"), jedis.get(
-			1).events);
-		// Otherwise, changes go to the same jedi.
-		change("#env=B\nx = 2", 3);
-		assertEquals("change 3 #env=B\nx = 2", jedis.get(1).events.get(1));
-		assertEquals(2, jedis.size());
-
-		// Where it runs changes without it changing (e.g. its environment was
-		// built): nothing moves until told so.
-		change("y = 1", 4);
-		assertEquals("jedi:A", jedis.get(2).name);
-		fallback = "C";
-		assertEquals(3, jedis.size());
-		server.relocateAll();
-		assertEquals(Arrays.asList("open 4 y = 1", "close", "shutdown"), jedis.get(
-			2).events);
-		assertEquals("jedi:C", jedis.get(3).name);
-		assertEquals(Collections.singletonList("open 4 y = 1"), jedis.get(3).events);
-
-		// Closed: on its jedi, which is let go.
-		server.didClose(new DidCloseTextDocumentParams(new TextDocumentIdentifier(
-			URI)));
-		assertEquals(Arrays.asList("open 4 y = 1", "close", "shutdown"), jedis.get(
-			3).events);
-	}
-
-	@Test
-	public void testCompletions() throws Exception {
-		open("ma");
-		final CompletionList list = complete();
-		// Jedi's, as they are.
-		assertEquals(Arrays.asList("max", "map"), labels(list));
-
-		// Resolved by the jedi analyzing the script, with its own data.
-		final CompletionItem max = list.getItems().get(0);
-		final Object marker = max.getData();
-		final CompletionItem resolved = server.resolveCompletionItem(max).get(10,
-			TimeUnit.SECONDS);
-		assertEquals("jedi:A resolved max (data jedi:A)", resolved.getDetail());
-		assertEquals(marker, resolved.getData());
-
-		// Moved: resolved by the jedi analyzing it now.
-		change("#env=B\nma", 2);
-		assertEquals("jedi:B resolved max (data jedi:B)", server
-			.resolveCompletionItem(complete().getItems().get(0)).get(10,
-				TimeUnit.SECONDS).getDetail());
-	}
-
-	@Test
-	public void testDiagnostics() {
-		open("x = 1");
-		final Fake a = jedis.get(0);
-		a.publish(URI, 1, "from A");
-		assertEquals(Collections.singletonList("from A"), messages());
-
-		// Moved: the old jedi's are out of date.
-		change("#env=B\nx = 1", 2);
-		a.publish(URI, 1, "stale");
-		jedis.get(1).publish(URI, 2, "from B");
-		assertEquals(Arrays.asList("from A", "from B"), messages());
-	}
-
-	// -- Helper methods --
-
-	private ApposePythonLanguageServer server(
-		final Function<Environment, LanguageServer> jedi)
-	{
-		final ApposePythonLanguageServer s = new ApposePythonLanguageServer(
-			doc -> new Environment(doc.getText().contains("#env=B") ? "B"
-				: fallback, null, null), jedi, null);
-		s.connect(new Client());
-		s.initialize(new InitializeParams());
-		return s;
-	}
-
-	private void open(final String text) {
-		server.didOpen(new DidOpenTextDocumentParams(new TextDocumentItem(URI,
-			"appose-python", 1, text)));
-	}
-
-	private void change(final String text, final int version) {
-		server.didChange(new DidChangeTextDocumentParams(
-			new VersionedTextDocumentIdentifier(URI, version), Collections
-				.singletonList(new TextDocumentContentChangeEvent(text))));
-	}
-
-	private CompletionList complete() throws Exception {
-		return server.completion(new CompletionParams(new TextDocumentIdentifier(
-			URI), new Position(0, 2))).get(10, TimeUnit.SECONDS).getRight();
-	}
-
-	private static List<String> labels(final CompletionList list) {
-		return list.getItems().stream().map(CompletionItem::getLabel).collect(
-			Collectors.toList());
-	}
-
-	private List<String> messages() {
-		final List<String> out = new ArrayList<>();
-		for (final PublishDiagnosticsParams p : published) {
-			for (final Diagnostic d : p.getDiagnostics()) {
-				out.add(d.getMessage().getLeft());
-			}
-		}
-		return out;
-	}
-
-	private final class Client implements LanguageClient {
-
-		@Override
-		public void publishDiagnostics(final PublishDiagnosticsParams p) {
-			published.add(p);
-		}
-
-		@Override
-		public void telemetryEvent(final Object object) {}
-
-		@Override
-		public void showMessage(final MessageParams m) {}
-
-		@Override
-		public CompletableFuture<MessageActionItem> showMessageRequest(
-			final ShowMessageRequestParams r)
-		{
-			return CompletableFuture.completedFuture(null);
-		}
-
-		@Override
-		public void logMessage(final MessageParams m) {}
-	}
-
-	/** A fake server, recording what it is told, completing given labels. */
-	private static final class Fake implements LanguageServer,
-		TextDocumentService, WorkspaceService, LanguageClientAware
+	/** Knows json's dumps (a function), dump, decoder (a module), __doc__. */
+	private static final class Jedi implements LanguageServer,
+		TextDocumentService, WorkspaceService
 	{
 
-		private final String name;
-		private final List<String> labels;
-		private final List<String> events = new CopyOnWriteArrayList<>();
-		private LanguageClient client;
-
-		private Fake(final String name, final String... labels) {
-			this.name = name;
-			this.labels = Arrays.asList(labels);
-		}
-
-		void publish(final String uri, final int version, final String message) {
-			client.publishDiagnostics(new PublishDiagnosticsParams(uri,
-				Collections.singletonList(new Diagnostic(new Range(new Position(0, 0),
-					new Position(0, 1)), message)), version));
-		}
-
-		@Override
-		public void connect(final LanguageClient c) {
-			client = c;
-		}
+		final List<Position> asked = new CopyOnWriteArrayList<>();
+		final List<String> resolved = new CopyOnWriteArrayList<>();
+		CompletableFuture<Void> hold;
+		final List<CompletableFuture<?>> held = new CopyOnWriteArrayList<>();
+		/** Whether it knows nothing yet (e.g. while json is installed). */
+		volatile boolean ignorant;
 
 		@Override
 		public CompletableFuture<InitializeResult> initialize(
@@ -281,7 +100,6 @@ public class ApposePythonLanguageServerTest {
 
 		@Override
 		public CompletableFuture<Object> shutdown() {
-			events.add("shutdown");
 			return CompletableFuture.completedFuture(null);
 		}
 
@@ -299,52 +117,194 @@ public class ApposePythonLanguageServerTest {
 		}
 
 		@Override
-		public void didOpen(final DidOpenTextDocumentParams p) {
-			final TextDocumentItem d = p.getTextDocument();
-			events.add("open " + d.getVersion() + " " + d.getText());
-		}
+		public void didOpen(final DidOpenTextDocumentParams p) {}
 
 		@Override
-		public void didChange(final DidChangeTextDocumentParams p) {
-			events.add("change " + p.getTextDocument().getVersion() + " " + p
-				.getContentChanges().get(0).getText());
-		}
+		public void didChange(final DidChangeTextDocumentParams p) {}
 
 		@Override
-		public void didClose(final DidCloseTextDocumentParams p) {
-			events.add("close");
-		}
+		public void didClose(final DidCloseTextDocumentParams p) {}
 
 		@Override
 		public void didSave(final DidSaveTextDocumentParams p) {}
-
-		@Override
-		public CompletableFuture<Either<List<CompletionItem>, CompletionList>>
-			completion(final CompletionParams p)
-		{
-			final List<CompletionItem> items = new ArrayList<>();
-			for (final String label : labels) {
-				final CompletionItem item = new CompletionItem(label);
-				item.setData(name);
-				items.add(item);
-			}
-			return CompletableFuture.completedFuture(Either.forRight(
-				new CompletionList(items)));
-		}
-
-		@Override
-		public CompletableFuture<CompletionItem> resolveCompletionItem(
-			final CompletionItem item)
-		{
-			item.setDetail(name + " resolved " + item.getLabel() + " (data " + item
-				.getData() + ")");
-			return CompletableFuture.completedFuture(item);
-		}
 
 		@Override
 		public void didChangeConfiguration(final DidChangeConfigurationParams p) {}
 
 		@Override
 		public void didChangeWatchedFiles(final DidChangeWatchedFilesParams p) {}
+
+		@Override
+		public CompletableFuture<Either<List<CompletionItem>, CompletionList>>
+			completion(final CompletionParams p)
+		{
+			asked.add(p.getPosition());
+			final List<CompletionItem> items = new ArrayList<>();
+			int i = 0;
+			for (final String name : ignorant ? new String[0] : new String[] {
+				"dumps", "dump", "decoder", "__doc__" })
+			{
+				final CompletionItem item = new CompletionItem(name);
+				item.setKind(name.equals("decoder") ? CompletionItemKind.Module
+					: CompletionItemKind.Function);
+				item.setInsertText(name);
+				item.setSortText("z" + i++);
+				items.add(item);
+			}
+			final Either<List<CompletionItem>, CompletionList> answer = Either
+				.forRight(new CompletionList(items));
+			if (hold == null) return CompletableFuture.completedFuture(answer);
+			final CompletableFuture<Either<List<CompletionItem>, CompletionList>> f =
+				new CompletableFuture<>();
+			held.add(f);
+			hold.thenRun(() -> f.complete(answer));
+			return f;
+		}
+
+		@Override
+		public CompletableFuture<CompletionItem> resolveCompletionItem(
+			final CompletionItem item)
+		{
+			resolved.add(item.getLabel());
+			item.setDetail(item.getLabel().equals("decoder") ? "module decoder"
+				: "def " + item.getLabel() + "(obj, *, indent: int=None) -> str");
+			return CompletableFuture.completedFuture(item);
+		}
+	}
+
+	@Test
+	public void testAskOnceAndFilter() throws Exception {
+		final Jedi jedi = new Jedi();
+		final ApposePythonLanguageServer server = new ApposePythonLanguageServer(jedi, 30);
+		open(server, "import json\njson.du");
+		List<CompletionItem> items = complete(server, "import json\njson.du");
+		// Asked about the word's first character.
+		assertEquals(new Position(1, 6), jedi.asked.get(0));
+		// The word's completions, without dunders.
+		assertEquals(Arrays.asList("dumps", "dump"), labels(items));
+		// Once a word is begun: callables, from the resolved signatures.
+		final CompletionItem dumps = items.get(0);
+		assertEquals("(obj, int indent)", dumps.getLabelDetails().getDetail());
+		assertEquals("str", dumps.getLabelDetails().getDescription());
+		assertEquals("dumps(${1:obj}, ${2:indent})", dumps.getInsertText());
+
+		// Typing on: the same answer, filtered; not asked again.
+		change(server, "import json\njson.dum", 2);
+		items = complete(server, "import json\njson.dum");
+		assertEquals(Arrays.asList("dumps", "dump"), labels(items));
+		// (The word typed in full is not offered again.)
+		change(server, "import json\njson.dumps", 3);
+		assertTrue(complete(server, "import json\njson.dumps").isEmpty());
+		assertEquals(1, jedi.asked.size());
+
+		// Nothing typed: names only (nothing resolved), dunders left out.
+		change(server, "import json\njson.", 4);
+		final int resolved = jedi.resolved.size();
+		items = complete(server, "import json\njson.");
+		assertEquals(Arrays.asList("dumps", "dump", "decoder"), labels(items));
+		assertNull(items.get(0).getLabelDetails());
+		assertEquals(resolved, jedi.resolved.size());
+	}
+
+	@Test
+	public void testEmptyAnswersAskedAgain() throws Exception {
+		final Jedi jedi = new Jedi();
+		jedi.ignorant = true;
+		final ApposePythonLanguageServer server = new ApposePythonLanguageServer(jedi, 0);
+		open(server, "import json\njson.du");
+		assertTrue(complete(server, "import json\njson.du").isEmpty());
+		// It knows more now: asked again, rather than the empty answer reused.
+		jedi.ignorant = false;
+		assertEquals(Arrays.asList("dumps", "dump"), labels(complete(server,
+			"import json\njson.du")));
+		assertEquals(2, jedi.asked.size());
+	}
+
+	@Test
+	public void testImportsAreNames() throws Exception {
+		final Jedi jedi = new Jedi();
+		final ApposePythonLanguageServer server = new ApposePythonLanguageServer(jedi, 30);
+		open(server, "from json import du");
+		final List<CompletionItem> items = complete(server, "from json import du");
+		assertEquals(Arrays.asList("dumps", "dump"), labels(items));
+		assertNull(items.get(0).getLabelDetails());
+	}
+
+	@Test
+	public void testSuperseded() throws Exception {
+		final Jedi jedi = new Jedi();
+		jedi.hold = new CompletableFuture<>();
+		final ApposePythonLanguageServer server = new ApposePythonLanguageServer(jedi, 0);
+		open(server, "x.a");
+		final CompletableFuture<Either<List<CompletionItem>, CompletionList>> slow =
+			server.completion(params("x.a"));
+		change(server, "x.b", 2);
+		final CompletableFuture<Either<List<CompletionItem>, CompletionList>> next =
+			server.completion(params("x.b"));
+		// The first question is cancelled, also on the server.
+		assertThrows(Exception.class, () -> slow.get(10, TimeUnit.SECONDS));
+		assertTrue(jedi.held.get(0).isCancelled());
+		jedi.hold.complete(null);
+		assertTrue(next.get(10, TimeUnit.SECONDS).getRight().getItems().isEmpty());
+	}
+
+	// -- Helper methods --
+
+	private static CompletionParams params(final String text) {
+		return new CompletionParams(new TextDocumentIdentifier(URI), Positions
+			.position(text, text.length()));
+	}
+
+	private static List<CompletionItem> complete(
+		final ApposePythonLanguageServer server, final String text) throws Exception
+	{
+		return server.completion(params(text)).get(10, TimeUnit.SECONDS)
+			.getRight().getItems();
+	}
+
+	private static void open(final ApposePythonLanguageServer server,
+		final String text)
+	{
+		server.didOpen(new DidOpenTextDocumentParams(new TextDocumentItem(URI,
+			"python", 1, text)));
+	}
+
+	private static void change(final ApposePythonLanguageServer server,
+		final String text, final int version)
+	{
+		server.didChange(new DidChangeTextDocumentParams(
+			new VersionedTextDocumentIdentifier(URI, version), Collections
+				.singletonList(new TextDocumentContentChangeEvent(text))));
+	}
+
+	private static List<String> labels(final List<CompletionItem> items) {
+		return items.stream().map(CompletionItem::getLabel).collect(Collectors
+			.toList());
+	}
+
+	@Test
+	public void testParse() {
+		Callable c = ApposePythonLanguageServer.parse("dumps",
+			"def dumps(obj, *, skipkeys: bool=False, cls=None, **kw) -> str");
+		assertEquals("[obj, bool skipkeys, cls, kw]", String.valueOf(c
+			.params()));
+		assertEquals("str", c.returnType());
+
+		// Brackets and strings in annotations and defaults; positional-only.
+		c = ApposePythonLanguageServer.parse("zeros", "def zeros(shape: tuple[int, ...], dtype: str=\"f,8\"" +
+			", /, order: Literal['C', 'F']='C') -> NDArray[float64]");
+		assertEquals("[tuple[int, ...] shape, str dtype, " +
+			"Literal['C', 'F'] order]", String.valueOf(c.params()));
+		assertEquals("NDArray[float64]", c.returnType());
+
+		// Classes (their constructors), without parameters or return type.
+		c = ApposePythonLanguageServer.parse("Path", "class Path()");
+		assertEquals(0, c.params().size());
+		assertNull(c.returnType());
+		c = ApposePythonLanguageServer.parse("f", "def f(*args)");
+		assertEquals("args", c.params().get(0).name());
+
+		// Not a signature.
+		assertNull(ApposePythonLanguageServer.parse("x", "instance x"));
 	}
 }

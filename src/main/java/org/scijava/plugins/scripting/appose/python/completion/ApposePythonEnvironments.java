@@ -42,16 +42,15 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
 
 import org.apposed.appose.Appose;
 import org.apposed.appose.Environment;
 import org.apposed.appose.Service;
 import org.apposed.appose.util.Environments;
+import org.eclipse.lsp4j.TextDocumentItem;
 import org.scijava.plugins.scripting.appose.python.ScriptEnvironment;
 import org.scijava.plugins.scripting.appose.python._internal.InlineMetadata;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorker;
-import org.scijava.plugins.scripting.appose.python._internal.BuildListener;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerService;
 
 /**
@@ -99,19 +98,8 @@ final class ApposePythonEnvironments {
 
 	private DependencyOverlays overlays;
 
-	/** Told when where scripts run may have changed. */
-	private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
-
 	private ApposePythonEnvironments(final ResidentWorkerService workers) {
 		this.workers = workers;
-		// NB: A script run builds its environment: its Python is known then.
-		if (workers != null) workers.addBuildListener(new BuildListener() {
-
-			@Override
-			public void buildFinished(final String envName, final Throwable error) {
-				if (error == null) changed();
-			}
-		});
 	}
 
 	/** Gets those of a context (by its resident worker service). */
@@ -122,43 +110,43 @@ final class ApposePythonEnvironments {
 	}
 
 	/**
-	 * Gets where a script runs, for its language server: its environment's
-	 * Python (or null, if not built), and its overlay (if any, and ready).
+	 * Derives an {@link org.scijava.code.lsp.Environment} for an Appose script.
+	 * <p>
+	 * The {@code python} executable is found using the script's text and file
+	 * path. For convenience, packages declared in the script but not yet
+	 * installed (i.e. between the time the dependency is added to the script
+	 * and the time when it is run) are provided to the language server in the
+	 * <em>overlay</em>.
+	 * </p>
 	 *
-	 * @param uri The script's URI (a file path, if saved).
-	 * @param settled Whether the dependencies are known not to be changing
-	 *          (e.g. on opening the script).
+	 * @param script the script
+	 * @return an {@link org.scijava.code.lsp.Environment} where:
+	 *         <ul>
+	 *         <li>the interpreter is the Python executable of the script's
+	 *         declared environment, <b>if that has already been built</b>,
+	 *         or {@code null} otherwise;</li>
+	 *         <li>the paths hold the overlay, once installed; none if no package
+	 *         is missing, or until it is installed (which starts once the
+	 *         script's dependencies stop changing, or at once if the script was
+	 *         just opened).</li>
+	 *         </ul>
 	 */
-	org.scijava.code.lsp.Environment environment(final String text,
-		final String uri, final boolean settled)
-	{
-		final String path = path(uri);
+	org.scijava.code.lsp.Environment environment(final TextDocumentItem script) {
+		final String text = script.getText();
+		final String path = path(script.getUri());
 		final String python = scriptPython(text, path);
+		final boolean settled = script.getVersion() <= 1;
+		// NB: An alternative design could have all the script's dependencies
+		// in a constant overlay, but that would have the effect of installing them
+		// twice - once for the overlay and once for the script's environment.
 		final String overlay = overlay(text, path, python, settled);
 		return new org.scijava.code.lsp.Environment(python, overlay == null ? null
 			: Collections.singletonList(overlay), null);
 	}
 
-	/**
-	 * Adds what to do when where scripts run may have changed without them
-	 * changing: when an environment is built, or an overlay is ready.
-	 */
-	void addListener(final Runnable listener) {
-		listeners.add(listener);
-	}
-
-	void removeListener(final Runnable listener) {
-		listeners.remove(listener);
-	}
-
-	private void changed() {
-		for (final Runnable listener : listeners) listener.run();
-	}
-
 	/** Sets the dependency overlays, e.g. to use fake ones in tests. */
 	synchronized void setOverlays(final DependencyOverlays overlays) {
 		this.overlays = overlays;
-		if (overlays != null) overlays.setOnReady(this::changed);
 	}
 
 	/** The file path of a {@code file:} URI, or null. */
@@ -210,7 +198,6 @@ final class ApposePythonEnvironments {
 			dir) -> installOverlay(workers, python, dependencies, dir), new File(
 				Environments.apposeEnvsDir(), TOOLING_ENV + "-overlays"),
 			OVERLAY_SETTLE, System::currentTimeMillis);
-		overlays.setOnReady(this::changed);
 		return overlays;
 	}
 
@@ -243,7 +230,7 @@ final class ApposePythonEnvironments {
 	 * earlier one. Completion never builds it. Returns null if not built.
 	 */
 	String scriptPython(final String text, final String path) {
-		// NB: Called on every keystroke, so remember what was found (but not
+		// NB: Called before each request, so remember what was found (but not
 		// what was not: the environment may be built at any moment).
 		final String key;
 		try {

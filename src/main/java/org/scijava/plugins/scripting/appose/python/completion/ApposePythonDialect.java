@@ -44,16 +44,14 @@ import org.apposed.appose.NDArray;
 import org.scijava.code.lsp.ScriptDialect;
 
 /**
- * How Python scripts run via Appose see their script parameters: as the
- * Python values the Java values become (see
- * {@code ApposePythonScriptEngine#marshal}), plus Appose's {@code task}.
+ * Describes how to turn Appose python scripts into plain python code.
  *
  * @author Gabriel Selzer
  */
-public final class ApposePythonDialect implements ScriptDialect {
+final class ApposePythonDialect implements ScriptDialect {
 
 	/** The type of the {@code task} variable scripts can use. */
-	public static final String TASK_TYPE = "appose.python_worker.Task";
+	private static final String TASK_TYPE = "appose.python_worker.Task";
 
 	@Override
 	public String runtimeType(final Class<?> type) {
