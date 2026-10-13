@@ -138,9 +138,9 @@ script's own line numbers.
 ## Code completion
 
 The Script Editor completes code in these scripts with a language server
-(`ApposePythonLanguageServer`, offered to `scijava-code-lsp`'s
-`LanguageServerService` by `ApposePythonServerPlugin`, so any other LSP client
-of it gets the same): [jedi-language-server](https://github.com/pappasam/jedi-language-server)
+(offered to `scijava-code-lsp`'s `LanguageServerService` by
+`ApposePythonServerPlugin`, so any other LSP client of it gets the same):
+[jedi-language-server](https://github.com/pappasam/jedi-language-server)
 (built on [Jedi](https://jedi.readthedocs.io/)). It completes names in scope,
 the script's `#@` parameters, `task`, builtins and keywords, and members of
 objects and modules; and it gives function signatures (with parameter names

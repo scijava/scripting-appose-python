@@ -69,11 +69,11 @@ import java.util.function.LongSupplier;
  *
  * @author Gabriel Selzer
  */
-public final class DependencyOverlays {
+final class DependencyOverlays {
 
 	/** Installs the missing packages of a script's environment. */
 	@FunctionalInterface
-	public interface Installer {
+	interface Installer {
 
 		/**
 		 * Installs the packages among {@code dependencies} that the environment
@@ -106,9 +106,6 @@ public final class DependencyOverlays {
 	/** The dependencies last seen for each environment, and since when. */
 	private final Map<String, Seen> seen = new HashMap<>();
 
-	/** Told when an overlay is ready. */
-	private volatile Runnable onReady = () -> {};
-
 	/**
 	 * @param installer Does the installing, on a background thread.
 	 * @param root Directory holding the overlays (one per environment).
@@ -116,21 +113,13 @@ public final class DependencyOverlays {
 	 *          their missing packages are installed.
 	 * @param clock The current time, in milliseconds.
 	 */
-	public DependencyOverlays(final Installer installer, final File root,
+	DependencyOverlays(final Installer installer, final File root,
 		final long settleMillis, final LongSupplier clock)
 	{
 		this.installer = installer;
 		this.root = root;
 		this.settleMillis = settleMillis;
 		this.clock = clock;
-	}
-
-	/**
-	 * Sets what to do when an overlay becomes ready (on the installing
-	 * thread), e.g. tell language servers to look again.
-	 */
-	public void setOnReady(final Runnable onReady) {
-		this.onReady = onReady == null ? () -> {} : onReady;
 	}
 
 	/**
@@ -145,7 +134,7 @@ public final class DependencyOverlays {
 	 *          (e.g. the script was just opened), so need no time to settle.
 	 * @return The overlay directory, or null if none is needed or ready.
 	 */
-	public String overlay(final String envName, final String python,
+	String overlay(final String envName, final String python,
 		final List<String> dependencies, final boolean settled)
 	{
 		if (dependencies == null || dependencies.isEmpty()) return null;
@@ -167,18 +156,10 @@ public final class DependencyOverlays {
 			final File overlay = new File(root, envName);
 			final CompletableFuture<String> started = CompletableFuture.supplyAsync(
 				() -> installer.install(python, dependencies, overlay), executor);
+			// NB: Once done, asking again gets the overlay.
 			installs.put(key, started);
-			// NB: Once done, so that asking again gets the overlay.
-			started.thenAccept(dir -> {
-				if (dir != null) onReady.run();
-			});
 			return null;
 		}
-	}
-
-	/** Stops the background thread. */
-	public void dispose() {
-		executor.shutdownNow();
 	}
 
 	private static final class Seen {
