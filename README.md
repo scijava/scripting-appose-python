@@ -79,6 +79,17 @@ supports works: `pixi.toml`, `environment.yml`, `requirements.txt` or
 sets the format explicitly, which is useful when the file name does not reveal
 it. Scripts that share a file share an environment.
 
+For pixi projects declaring several environments, the optional `activate`
+attribute picks which one the script runs in:
+
+```python
+#@script(env="pixi.toml", activate="cuda")
+```
+
+Scripts differing only in `activate` share the project's build, but each gets
+its own worker. The attribute requires an environment file, and a format that
+supports sub-environments (currently pixi only).
+
 A script cannot do both.
 
 The environment is built the first time a script needs it, which may take a

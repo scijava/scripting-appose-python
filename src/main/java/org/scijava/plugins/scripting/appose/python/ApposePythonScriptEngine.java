@@ -87,8 +87,12 @@ import org.scijava.task.TaskService;
  * Scripts declare their Appose environment via the {@code #@script} directive:
  * </p>
  * <pre>
- * #@script(env="myenv.toml", scheme="pixi.toml")
+ * #@script(env="myenv.toml", scheme="pixi.toml", activate="cuda")
  * </pre>
+ * <p>
+ * The optional {@code activate} attribute names the sub-environment to use
+ * within the environment (a pixi environment, for pixi projects).
+ * </p>
  * <p>
  * The engine lazily builds the environment on first use, and keeps one Python
  * worker process per environment alive across script runs, so that imported
@@ -443,14 +447,16 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 	 * Gets the resident worker for the script's Appose environment, which the
 	 * script declares either inline, via a PEP 723 {@code # /// script}
 	 * metadata block, or in a file named by the {@code env} (and optionally
-	 * {@code scheme}) attributes of its {@code #@script} directive. The
-	 * environment itself is built lazily, by the worker's first task.
+	 * {@code scheme}, {@code activate}) attributes of its {@code #@script}
+	 * directive. The environment itself is built lazily, by the worker's first
+	 * task.
 	 */
 	private ResidentWorker worker(final ScriptInfo info, final String script)
 		throws ScriptException
 	{
 		if (info == null) throw noEnvironment();
 		final String envRef = info.get("env");
+		final String activate = info.get("activate");
 		final String metadata;
 		try {
 			metadata = InlineMetadata.extract(script);
@@ -463,6 +469,11 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 				throw new ScriptException("The script declares its environment " +
 					"twice: inline, and via #@script(env=\"" + envRef + "\"). " +
 					"Remove one of them.");
+			}
+			if (activate != null) {
+				throw new ScriptException("#@script(activate=\"" + activate +
+					"\") requires an environment file, via env=; it cannot be " +
+					"combined with an inline environment.");
 			}
 			return inlineWorker(metadata, info.getPath());
 		}
@@ -482,7 +493,7 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 			throw scriptException("Cannot read Appose environment file: " +
 				envFile.getAbsolutePath(), e);
 		}
-		return worker(envName(envFile), content, info.get("scheme"));
+		return worker(envName(envFile), activate, content, info.get("scheme"));
 	}
 
 	/** Gets the resident worker for an environment declared inline. */
@@ -502,17 +513,18 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 		catch (final IllegalArgumentException e) {
 			throw scriptException(e.getMessage(), e);
 		}
-		return worker(envName, content, InlineMetadata.SCHEME);
+		return worker(envName, null, content, InlineMetadata.SCHEME);
 	}
 
 	/**
 	 * Gets the resident worker for the named environment, built from the given
 	 * configuration.
 	 */
-	private ResidentWorker worker(final String envName, final String content,
-		final String scheme)
+	private ResidentWorker worker(final String envName, final String activate,
+		final String content, final String scheme)
 	{
-		return workerService.worker(envName, scheme + "\n" + content, () -> {
+		return workerService.worker(envName, activate, scheme + "\n" + content,
+			() -> {
 			final Builder<?> builder = Appose.content(content);
 			return scheme == null ? builder : builder.scheme(scheme);
 		},

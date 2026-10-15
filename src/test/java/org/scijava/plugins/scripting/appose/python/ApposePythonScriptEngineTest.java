@@ -226,6 +226,19 @@ public class ApposePythonScriptEngineTest {
 	}
 
 	@Test
+	public void testEvalWithActivateAndInlineEnv() throws Exception {
+		final String script = "#@script(activate=\"cuda\")\n" + //
+			"# /// script\n" + //
+			"# dependencies = [\"appose\"]\n" + //
+			"# ///\n" + //
+			"print('hi')\n";
+		final ScriptException e =
+			assertThrows(ScriptException.class, () -> eval("test.py", script));
+		assertTrue(e.getMessage(), e.getMessage().contains(
+			"activate=\"cuda\") requires an environment file"));
+	}
+
+	@Test
 	public void testEvalWithInvalidInlineMetadata() throws Exception {
 		final String script = "# /// script\n" + //
 			"# dependencies = \"appose\"\n" + //

@@ -55,6 +55,7 @@ public class LazyEnvironment {
 
 	private final String name;
 	private final Builder<?> builder;
+	private final String activate;
 	private final List<BuildListener> listeners = new CopyOnWriteArrayList<>();
 
 	private volatile Environment env;
@@ -65,7 +66,21 @@ public class LazyEnvironment {
 	 * @param builder Builder for the environment; built on first use.
 	 */
 	public LazyEnvironment(final String name, final Builder<?> builder) {
+		this(name, builder, null);
+	}
+
+	/**
+	 * @param name Name of the environment, as reported to listeners, and as
+	 *          given to the builder.
+	 * @param builder Builder for the environment; built on first use.
+	 * @param activate Name of the sub-environment to activate once built (e.g.
+	 *          a pixi environment), or null to use the environment as built.
+	 */
+	public LazyEnvironment(final String name, final Builder<?> builder,
+		final String activate)
+	{
 		this.name = name;
+		this.activate = activate;
 		// Note: Subscribe once, here, and dispatch to the current listeners,
 		// because builders accumulate subscribers with every call.
 		this.builder = builder.name(name) //
@@ -98,7 +113,8 @@ public class LazyEnvironment {
 			if (env != null) return env;
 			listeners.forEach(l -> l.buildStarted(name));
 			try {
-				env = builder.build();
+				final Environment built = builder.build();
+				env = activate == null ? built : built.activate(activate);
 			}
 			catch (final BuildException | RuntimeException exc) {
 				listeners.forEach(l -> l.buildFinished(name, exc));

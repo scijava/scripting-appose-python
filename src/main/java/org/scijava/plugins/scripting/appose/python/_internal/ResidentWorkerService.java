@@ -72,7 +72,7 @@ public class ResidentWorkerService extends AbstractService implements
 	@Parameter(required = false)
 	private LogService log;
 
-	/** Environments by name, each with its configuration and worker. */
+	/** Environments by name and activation, each with its configuration and worker. */
 	private final Map<String, Entry> entries = new HashMap<>();
 
 	/**
@@ -85,25 +85,30 @@ public class ResidentWorkerService extends AbstractService implements
 	 * </p>
 	 *
 	 * @param name Name of the environment.
+	 * @param activate Name of the sub-environment to activate once the
+	 *          environment is built (e.g. a pixi environment), or null for none.
+	 *          Workers differing only in this share the environment's build.
 	 * @param config The environment's configuration, e.g. its file contents.
 	 * @param builder Creates a builder for the environment.
 	 * @param launcher Creates a worker's service from the built environment.
 	 */
-	public ResidentWorker worker(final String name, final String config,
-		final Supplier<Builder<?>> builder,
+	public ResidentWorker worker(final String name, final String activate,
+		final String config, final Supplier<Builder<?>> builder,
 		final Function<Environment, org.apposed.appose.Service> launcher)
 	{
 		final ResidentWorker stale;
 		final ResidentWorker worker;
+		final String key = activate == null ? name : name + "\0" + activate;
 		synchronized (entries) {
-			final Entry entry = entries.get(name);
+			final Entry entry = entries.get(key);
 			if (entry != null && entry.config.equals(config)) return entry.worker;
 			stale = entry == null ? null : entry.worker;
-			final LazyEnvironment env = new LazyEnvironment(name, builder.get());
+			final LazyEnvironment env = new LazyEnvironment(name, builder.get(),
+				activate);
 			env.addBuildListener(SciJavaTasks.buildListener(taskService,
 				statusService, log));
 			worker = new ResidentWorker(env, launcher);
-			entries.put(name, new Entry(config, worker));
+			entries.put(key, new Entry(config, worker));
 		}
 		if (stale != null) stale.release();
 		return worker;
