@@ -58,14 +58,14 @@ import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerServi
  * know: the Python of a script's environment, if built (in this session, or an
  * earlier one; never building it, nor disturbing its worker); the overlay of
  * packages it declares but its environment lacks (see
- * {@link DependencyOverlays}); and the tooling environment jedi-language-server
- * runs in.
+ * {@link DependencyOverlays}), and the tooling environment overlays are
+ * installed from.
  *
  * @author Gabriel Selzer
  */
 final class ApposePythonEnvironments {
 
-	/** Name of the tooling environment in which the language server runs. */
+	/** Name of the tooling environment that installs overlays. */
 	static final String TOOLING_ENV = "appose-python-completion";
 
 	/**
@@ -341,20 +341,6 @@ final class ApposePythonEnvironments {
 		return null;
 	}
 
-	/**
-	 * Gets the Python of the tooling environment, in which jedi-language-server
-	 * runs (see {@link JediServerProcessPlugin}): built first if needed (but
-	 * starting no worker).
-	 */
-	static String toolingPython(final ResidentWorkerService workers)
-		throws Exception
-	{
-		final String python = pythonExecutable(toolingWorker(workers).environment()
-			.get());
-		if (python == null) throw new IOException("No Python in " + TOOLING_ENV);
-		return python;
-	}
-
 	/** Gets the tooling environment's worker, building it first if needed. */
 	private static ResidentWorker toolingWorker(
 		final ResidentWorkerService workers)
@@ -365,8 +351,8 @@ final class ApposePythonEnvironments {
 	}
 
 	/**
-	 * The tooling environment: Python, Jedi, jedi-language-server, NumPy and
-	 * Appose; and uv, to install packages for {@link DependencyOverlays}.
+	 * The tooling environment: Python and Appose, to run overlay.py; and uv, to
+	 * install packages for {@link DependencyOverlays}.
 	 */
 	static String toolingConfig() {
 		return "[workspace]\n" + //
@@ -375,15 +361,13 @@ final class ApposePythonEnvironments {
 			"platforms = [\"" + InlineMetadata.condaPlatform() + "\"]\n" + //
 			"\n" + //
 			"[dependencies]\n" + //
+			// NB: The overlays of scripts whose environment is not built are
+			// installed for this Python, for jedi-language-server's Python (see
+			// code-lsp-jedi) to find: the versions must match.
 			"python = \"3.12.*\"\n" + //
-			"jedi = \">=0.19.2\"\n" + //
-			// NB: Script parameters are typed as NumPy arrays (see
-			// ApposePythonDialect): known even before a script's environment is.
-			"numpy = \"*\"\n" + //
 			"\n" + //
 			"[pypi-dependencies]\n" + //
 			"appose = \"*\"\n" + //
-			"jedi-language-server = \">=0.47\"\n" + //
 			"uv = \"*\"\n";
 	}
 

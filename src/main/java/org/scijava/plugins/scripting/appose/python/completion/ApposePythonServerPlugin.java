@@ -63,15 +63,28 @@ public class ApposePythonServerPlugin implements LanguageServerPlugin {
 	private ResidentWorkerService workers;
 
 	@Override
+	public boolean supports(final String languageId) {
+		// NB: Not "python", which this builds on. Without jedi, there is
+		// nothing to serve.
+		return "appose-python".equals(languageId) && jediOffered();
+	}
+
+	@Override
 	public boolean supports(final ScriptLanguage language) {
 		// NB: Without jedi, there is nothing to serve.
 		return language instanceof ApposePythonScriptLanguage && jediOffered();
 	}
 
 	@Override
-	public LanguageServer create(final Environment environment) {
-		return new ApposePythonLanguageServer(servers.launch("python",
-			ApposePythonEnvironments.of(workers)::environment), SIGNATURES);
+	public LanguageServer create(final String languageId,
+		final Environment environment)
+	{
+		// NB: Where each script runs is as its text says (see
+		// ApposePythonEnvironments), whatever the caller thinks; and may change
+		// as it is edited, moving it to another Python server.
+		return new ApposePythonLanguageServer(new RoutingLanguageServer(
+			env -> servers.launch("python", env), ApposePythonEnvironments.of(
+				workers)::environment), SIGNATURES);
 	}
 
 	@Override
@@ -79,8 +92,8 @@ public class ApposePythonServerPlugin implements LanguageServerPlugin {
 		return DIALECT;
 	}
 
-	/** Whether jedi-language-server is offered. */
+	/** Whether jedi-language-server (or another Python server) is offered. */
 	boolean jediOffered() {
-		return servers.launch("python", Environment.NONE) != null;
+		return servers.supports("python");
 	}
 }

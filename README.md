@@ -146,8 +146,8 @@ the script's `#@` parameters, `task`, builtins and keywords, and members of
 objects and modules; and it gives function signatures (with parameter names
 and types), documentation, hover and syntax errors.
 
-The server runs in a small environment of its own
-(`appose-python-completion`: Python, jedi-language-server, Appose and uv),
+The server, offered by `scijava-code-lsp-jedi`, runs in a small environment
+of its own (`code-lsp-jedi`: Python, Jedi, jedi-language-server and NumPy),
 which is built in the background the first time you complete code, and
 takes a while only then; until it is, there are no completions. The server
 talks to the editor via the
@@ -155,7 +155,7 @@ talks to the editor via the
 (see `scijava-code-lsp`); it sees the script as plain Python, with its `#@`
 parameters declared. One server runs per script environment; servers
 unused for 10 minutes stop. Their error output goes to
-`appose-python-completion-server.log`, next to Appose's environments.
+`code-lsp-jedi-server.log`, next to Appose's environments.
 
 Once a script's environment is built, by running the script (in this session
 or an earlier one), the server analyzes the script against it, so that the packages
@@ -163,7 +163,8 @@ installed there are known too. Packages the script declares (in its
 `# /// script` block) but its environment lacks, e.g. a dependency you just
 added, are installed for completion only, into a separate directory, a moment
 after you stop editing the dependencies; so they are known before you run the
-script. This covers PyPI packages; conda packages (`[tool.pixi.dependencies]`)
+script. (They are installed with uv, from another small environment,
+`appose-python-completion`.) This covers PyPI packages; conda packages (`[tool.pixi.dependencies]`)
 and environments declared in files are known once the script has run.
 Completion never builds a script's environment itself, and never disturbs
 its worker. Script parameters are known by the Python types they have at run

@@ -260,26 +260,6 @@ public class ApposePythonServersTest {
 		assertNull(DIALECT.runtimeType(Context.class));
 	}
 
-	@Test
-	public void testServerOptions() {
-		final JediServerProcessPlugin spec = new JediServerProcessPlugin(() -> null,
-			new File("workspace"), new File("server.log"));
-		assertEquals("python", spec.languageId());
-		final String diagnostics = "diagnostics={enable=true, didOpen=true, " +
-			"didChange=true, didSave=false}";
-		assertEquals("{workspace={environmentPath=/env/bin/python, " +
-			"extraPaths=[/overlay]}, " + diagnostics + "}", String.valueOf(spec
-				.initializationOptions(new Environment(
-					"/env/bin/python", Collections.singletonList("/overlay"), null))));
-		// Without a script environment: the server's own.
-		assertEquals("{workspace={extraPaths=[]}, " + diagnostics + "}", String
-			.valueOf(spec.initializationOptions(
-				Environment.NONE)));
-		assertTrue(spec.rootUri(Environment.NONE)
-			.startsWith("file:"));
-		new File("workspace").delete();
-	}
-
 	// -- Helper methods --
 
 	/** The script as plain Python, as the plugin's servers see it. */
