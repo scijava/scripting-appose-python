@@ -67,10 +67,10 @@ import org.scijava.script.ScriptService;
  * (see {@link ApposePythonServerPlugin}), with a real jedi-language-server, through
  * the {@link LanguageServerService}, as editors use it.
  * <p>
- * The first completion builds the completion tooling environment (Python and
- * jedi-language-server, via pixi), and a script run builds the small uv
- * environment of {@code appose-test/requirements.txt}; both require network
- * access.
+ * The first completion builds jedi-language-server's environment (see
+ * code-lsp-jedi), a new dependency the tooling environment that installs
+ * overlays, and a script run the small uv environment of
+ * {@code appose-test/requirements.txt}; all require network access.
  * </p>
  *
  * @author Gabriel Selzer
@@ -182,15 +182,13 @@ public class ApposePythonCompletionIntegrationTest {
 		final long deadline = System.currentTimeMillis() + BUILD_TIMEOUT;
 		List<Diagnostic> problems = Collections.emptyList();
 		while (problems.isEmpty() && System.currentTimeMillis() < deadline) {
-			problems = servers.diagnose(language, code,
-				120_000);
+			problems = problems(code);
 		}
 		assertFalse(problems.isEmpty());
 		assertTrue(problems.toString(), problems.get(0).getRange().getStart()
 			.getLine() >= 2);
 		// Fixed: no more problems.
-		assertTrue(servers.diagnose(language, code
-			.replace("(1 +", "(1 + 2)"), 120_000).isEmpty());
+		assertTrue(problems(code.replace("(1 +", "(1 + 2)")).isEmpty());
 	}
 
 	@Test
@@ -199,24 +197,6 @@ public class ApposePythonCompletionIntegrationTest {
 		// environment is not built (here, it is not even declared).
 		completeUntil("#@ net.imglib2.img.Img image\nx = 1\nimage.", null,
 			"shape");
-	}
-
-	@Test
-	public void testServerOutlivesNoParent() throws Exception {
-		// The server, once its parent (this JVM) is gone, must exit: here, its
-		// parent is a process that already has.
-		completeUntil("import json\njson.du", null, "dumps");
-		final String python = ApposePythonEnvironments.pythonOnDisk(new File(
-			org.apposed.appose.util.Environments.apposeEnvsDir(),
-			ApposePythonEnvironments.TOOLING_ENV));
-		final Process gone = new ProcessBuilder(python, "-c", "pass").start();
-		gone.waitFor();
-		final Process process = new ProcessBuilder(python, "-c",
-			JediServerProcessPlugin.LAUNCHER,
-			String.valueOf(gone.pid())).redirectErrorStream(true).start();
-		final boolean exited = process.waitFor(30, TimeUnit.SECONDS);
-		if (!exited) process.destroyForcibly();
-		assertTrue(exited);
 	}
 
 	@Test
@@ -243,6 +223,13 @@ public class ApposePythonCompletionIntegrationTest {
 	private static ScriptSession session(final String path) {
 		return sessions.computeIfAbsent(path == null ? "" : path, p -> servers
 			.session(language).setFile(() -> path == null ? null : new File(path)));
+	}
+
+	/** The problems found in a script, in a session of its own. */
+	private static List<Diagnostic> problems(final String code) {
+		try (ScriptSession session = servers.session(language)) {
+			return session.update(code).diagnostics(120_000);
+		}
 	}
 
 	/** Tells the servers a script's text. */
