@@ -37,9 +37,7 @@ import org.scijava.code.lsp.LanguageServerService;
 import org.scijava.code.lsp.ScriptDialect;
 import org.scijava.plugin.Parameter;
 import org.scijava.plugin.Plugin;
-import org.scijava.plugins.scripting.appose.python.ApposePythonScriptLanguage;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerService;
-import org.scijava.script.ScriptLanguage;
 
 /**
  * A {@link LanguageServerPlugin} for Appose-Python scripts, backed by
@@ -64,15 +62,9 @@ public class ApposePythonServerPlugin implements LanguageServerPlugin {
 
 	@Override
 	public boolean supports(final String languageId) {
-		// NB: Not "python", which this builds on. Without jedi, there is
-		// nothing to serve.
+		// NB: Appose-Python scripts too, by their language's name. Not "python",
+		// which this builds on. Without jedi, there is nothing to serve.
 		return "appose-python".equals(languageId) && jediOffered();
-	}
-
-	@Override
-	public boolean supports(final ScriptLanguage language) {
-		// NB: Without jedi, there is nothing to serve.
-		return language instanceof ApposePythonScriptLanguage && jediOffered();
 	}
 
 	@Override
