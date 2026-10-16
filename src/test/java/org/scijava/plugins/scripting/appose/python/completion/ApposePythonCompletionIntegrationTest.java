@@ -64,8 +64,9 @@ import org.scijava.script.ScriptService;
 
 /**
  * End-to-end tests of the language servers of Python scripts run via Appose
- * (see {@link ApposePythonServerPlugin}), with a real jedi-language-server, through
- * the {@link LanguageServerService}, as editors use it.
+ * (see {@link ApposePythonDialect}, and scijava-code-lsp-jedi), with a real
+ * jedi-language-server, through the {@link LanguageServerService}, as editors
+ * use it.
  * <p>
  * The first completion builds jedi-language-server's environment (see
  * code-lsp-jedi), a new dependency the tooling environment that installs

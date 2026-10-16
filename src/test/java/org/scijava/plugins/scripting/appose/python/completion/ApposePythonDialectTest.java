@@ -34,20 +34,18 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import java.io.File;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
 import net.imglib2.img.Img;
 
-import org.eclipse.lsp4j.TextDocumentItem;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.scijava.Context;
 import org.scijava.code.lsp.LanguageServerService;
 import org.scijava.code.lsp.Environment;
-import org.scijava.code.lsp.LanguageServerPlugin;
+import org.scijava.code.lsp.ScriptDialect;
 import org.scijava.code.lsp.ScriptDocument;
 import org.scijava.plugin.PluginService;
 import org.scijava.plugins.scripting.appose.python.ScriptEnvironment;
@@ -56,20 +54,19 @@ import org.scijava.script.ScriptLanguage;
 import org.scijava.script.ScriptService;
 
 /**
- * Tests what {@link ApposePythonServerPlugin} tells jedi-language-server about
+ * Tests what {@link ApposePythonDialect} tells Python language servers about
  * Python scripts run via Appose (the script as plain Python, and where it
  * runs), without starting any server process.
  *
  * @author Gabriel Selzer
  */
-public class ApposePythonServersTest {
+public class ApposePythonDialectTest {
 
 	private static final ApposePythonDialect DIALECT = new ApposePythonDialect();
 
 	private Context context;
 	private ScriptLanguage language;
-	private ApposePythonServerPlugin plugin;
-	private ApposePythonEnvironments environments;
+	private ApposePythonDialect dialect;
 
 	@Before
 	public void setUp() {
@@ -77,13 +74,11 @@ public class ApposePythonServersTest {
 			ResidentWorkerService.class, LanguageServerService.class);
 		language = context.service(ScriptService.class).getLanguageByName(
 			"appose-python");
-		plugin = context.service(PluginService.class).createInstancesOfType(
-			LanguageServerPlugin.class).stream().filter(
-				p -> p instanceof ApposePythonServerPlugin).map(
-				p -> (ApposePythonServerPlugin) p)
+		dialect = context.service(PluginService.class).createInstancesOfType(
+			ScriptDialect.class).stream().filter(
+				p -> p instanceof ApposePythonDialect).map(
+				p -> (ApposePythonDialect) p)
 			.findFirst().get();
-		environments = ApposePythonEnvironments.of(context.service(
-			ResidentWorkerService.class));
 	}
 
 	@After
@@ -93,10 +88,11 @@ public class ApposePythonServersTest {
 
 	@Test
 	public void testServersAreOffered() {
+		// Its scripts are plain Python, which scijava-code-lsp-jedi serves.
+		assertTrue(dialect.supports(language));
+		assertEquals("python", dialect.languageId());
 		assertTrue(context.service(LanguageServerService.class).supports(
 			language));
-		// NB: Here, appose-python offers the Python server itself.
-		assertTrue(plugin.jediOffered());
 	}
 
 	@Test
@@ -113,34 +109,9 @@ public class ApposePythonServersTest {
 	@Test
 	public void testEnvironmentWithoutOne() {
 		// No script environment has been built: the server's own Python.
-		final Environment env = environments.environment(new TextDocumentItem(
-			"untitled:/a.py", "appose-python", 2, "import os\nos.pa"));
+		final Environment env = dialect.environment("import os\nos.pa", null);
 		assertNull(env.interpreter());
 		assertTrue(env.paths().isEmpty());
-	}
-
-	@Test
-	public void testOverlay() throws Exception {
-		// A script declaring a dependency its environment lacks.
-		final List<List<String>> installed = new ArrayList<>();
-		environments.setOverlays(new DependencyOverlays((python, dependencies,
-			dir) -> {
-			installed.add(dependencies);
-			return "/overlays/blur";
-		}, new File("overlays"), 0, System::currentTimeMillis));
-		final String code = "# /// script\n# dependencies = [\"tifffile\"]\n" +
-			"# ///\nimport tifffile\ntifffile.im";
-		final TextDocumentItem doc = new TextDocumentItem("untitled:/a.py",
-			"appose-python", 1, code);
-		// On opening the script, its dependencies are settled: the overlay is
-		// installed; once ready, the server searches it.
-		environments.environment(doc);
-		for (int i = 0; i < 100 && installed.isEmpty(); i++) Thread.sleep(20);
-		Thread.sleep(50);
-		assertEquals(Collections.singletonList(Collections.singletonList(
-			"tifffile")), installed);
-		assertEquals(Collections.singletonList("/overlays/blur"), environments
-			.environment(doc).paths());
 	}
 
 	@Test
@@ -149,10 +120,8 @@ public class ApposePythonServersTest {
 		// it, even as its metadata is edited.
 		final String script = "# /// script\n# dependencies = [\"appose\"]\n" +
 			"# ///\nimport os\nos.pa";
-		environments.environment(new TextDocumentItem("untitled:/a.py",
-			"appose-python", 2, script));
-		environments.environment(new TextDocumentItem("untitled:/a.py",
-			"appose-python", 3, script.replace("appose", "appose, numpy")));
+		dialect.environment(script, null);
+		dialect.environment(script.replace("appose", "appose, numpy"), null);
 		assertTrue(context.service(ResidentWorkerService.class).workers()
 			.isEmpty());
 	}
@@ -176,8 +145,7 @@ public class ApposePythonServersTest {
 			java.nio.file.Files.createDirectories(python.getParent());
 			java.nio.file.Files.createFile(python);
 
-			final Environment env = environments.environment(new TextDocumentItem(script
-				.toURI().toString(), "appose-python", 2, header + "numpy.ze"));
+			final Environment env = dialect.environment(header + "numpy.ze", script);
 			// The server analyzes against the environment's Python...
 			assertEquals(python.toFile().getAbsolutePath(), env.interpreter());
 			// ...without anything built or started.
@@ -262,10 +230,10 @@ public class ApposePythonServersTest {
 
 	// -- Helper methods --
 
-	/** The script as plain Python, as the plugin's servers see it. */
+	/** The script as plain Python, as its servers see it. */
 	private ScriptDocument document(final String code) {
 		return ScriptDocument.of(code, context.service(LanguageServerService.class)
-			.scriptParameters(code), plugin.dialect());
+			.scriptParameters(code), dialect);
 	}
 
 	private static void delete(final java.nio.file.Path dir) throws Exception {
