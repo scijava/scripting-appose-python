@@ -41,17 +41,47 @@ import java.util.Map;
 import net.imglib2.RandomAccessibleInterval;
 
 import org.apposed.appose.NDArray;
+import org.scijava.code.lsp.Environment;
 import org.scijava.code.lsp.ScriptDialect;
+import org.scijava.plugin.Parameter;
+import org.scijava.plugin.Plugin;
+import org.scijava.plugins.scripting.appose.python.ApposePythonScriptLanguage;
+import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerService;
+import org.scijava.script.ScriptLanguage;
 
 /**
- * Describes how to turn Appose python scripts into plain python code.
+ * Describes how to turn Appose python scripts into plain python code, and
+ * where they run (see {@link ApposePythonEnvironments}).
  *
  * @author Gabriel Selzer
  */
-final class ApposePythonDialect implements ScriptDialect {
+@Plugin(type = ScriptDialect.class, name = "Appose-Python")
+public class ApposePythonDialect implements ScriptDialect {
 
 	/** The type of the {@code task} variable scripts can use. */
 	private static final String TASK_TYPE = "appose.python_worker.Task";
+
+	@Parameter(required = false)
+	private ResidentWorkerService workers;
+
+	private ApposePythonEnvironments environments;
+
+	@Override
+	public boolean supports(final ScriptLanguage language) {
+		return language instanceof ApposePythonScriptLanguage;
+	}
+
+	@Override
+	public String languageId() {
+		return "python";
+	}
+
+	@Override
+	public Environment environment(final String text, final File file) {
+		// NB: As its #@script line, or its inline metadata, says.
+		return environments().environment(text, file == null ? null : file
+			.getPath());
+	}
 
 	@Override
 	public String runtimeType(final Class<?> type) {
@@ -102,5 +132,13 @@ final class ApposePythonDialect implements ScriptDialect {
 	@Override
 	public List<String> extraDeclarations() {
 		return Collections.singletonList(declare("task", TASK_TYPE));
+	}
+
+	/** Gets where scripts run, creating it on first use. */
+	private synchronized ApposePythonEnvironments environments() {
+		if (environments == null) {
+			environments = new ApposePythonEnvironments(workers);
+		}
+		return environments;
 	}
 }

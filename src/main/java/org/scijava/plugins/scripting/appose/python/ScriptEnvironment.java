@@ -50,7 +50,7 @@ import org.scijava.plugins.scripting.appose.python._internal.InlineMetadata;
  * <p>
  * Both running a script ({@link ApposePythonScriptEngine}) and completing code
  * in it ({@link
- * org.scijava.plugins.scripting.appose.python.completion.ApposePythonServerPlugin})
+ * org.scijava.plugins.scripting.appose.python.completion.ApposePythonDialect})
  * resolve its environment here, so that they agree on the environment's name
  * and configuration.
  * </p>
