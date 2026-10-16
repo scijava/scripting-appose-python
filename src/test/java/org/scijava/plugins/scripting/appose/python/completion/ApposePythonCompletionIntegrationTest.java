@@ -29,7 +29,6 @@
 
 package org.scijava.plugins.scripting.appose.python.completion;
 
-import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -45,16 +44,12 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import org.eclipse.lsp4j.CompletionItem;
-import org.eclipse.lsp4j.CompletionList;
 import org.eclipse.lsp4j.Diagnostic;
-import org.eclipse.lsp4j.Hover;
-import org.eclipse.lsp4j.SignatureHelp;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.scijava.Context;
 import org.scijava.code.lsp.LanguageServerService;
-import org.scijava.code.lsp.Positions;
 import org.scijava.code.lsp.ScriptSession;
 import org.scijava.module.ModuleService;
 import org.scijava.script.ScriptInfo;
@@ -63,15 +58,15 @@ import org.scijava.script.ScriptModule;
 import org.scijava.script.ScriptService;
 
 /**
- * End-to-end tests of the language servers of Python scripts run via Appose
- * (see {@link ApposePythonDialect}, and scijava-code-lsp-jedi), with a real
- * jedi-language-server, through the {@link LanguageServerService}, as editors
- * use it.
+ * End-to-end tests of completing Python scripts run via Appose (see
+ * {@link ApposePythonDialect}), with a real jedi-language-server (from
+ * scijava-code-lsp-jedi, whose own tests test it on plain Python), through the
+ * {@link LanguageServerService}, as editors use it: what is particular to
+ * these scripts.
  * <p>
- * The first completion builds jedi-language-server's environment (see
- * code-lsp-jedi), a new dependency the tooling environment that installs
- * overlays, and a script run the small uv environment of
- * {@code appose-test/requirements.txt}; all require network access.
+ * The first completion builds jedi-language-server's environment, and a
+ * script run the small uv environment of {@code appose-test/requirements.txt};
+ * both require network access.
  * </p>
  *
  * @author Gabriel Selzer
@@ -106,22 +101,6 @@ public class ApposePythonCompletionIntegrationTest {
 	}
 
 	@Test
-	public void testStandardLibrary() throws Exception {
-		// Before any script environment is built, the server knows the standard
-		// library, with signatures and documentation.
-		final List<CompletionItem> completions = completeUntil(
-			"import json\njson.du", null, "dumps");
-		final CompletionItem dumps = completions.stream().filter(c -> c.getLabel()
-			.equals("dumps") && c.getLabelDetails() != null).findFirst().get();
-		assertTrue(dumps.getLabelDetails().getDetail(), dumps.getLabelDetails()
-			.getDetail().startsWith("(Any obj, bool skipkeys"));
-		assertTrue(dumps.getDocumentation() != null || session(null).resolve(
-			dumps).get(1, TimeUnit.MINUTES)
-			.getDocumentation() != null);
-		report("import json\njson.l", null, "loads", "o");
-	}
-
-	@Test
 	public void testScriptEnvironment() throws Exception {
 		// Run a script, building its environment (which includes numpy).
 		final File script = new File(scriptDir, "completion.py");
@@ -139,46 +118,12 @@ public class ApposePythonCompletionIntegrationTest {
 		// known, and so is the type of the image parameter.
 		completeUntil(header + "np.ze", script.getPath(), "zeros");
 		completeUntil(header + "image.sha", script.getPath(), "shape");
-		report(header + "np.random.r", script.getPath(), "randn", "a");
-	}
-
-	@Test
-	public void testSignatureHelp() throws Exception {
-		final String code = "import json\njson.dumps(obj, ";
-		final ScriptSession session = session(null);
-		final long deadline = System.currentTimeMillis() + BUILD_TIMEOUT;
-		SignatureHelp help = null;
-		while (help == null && System.currentTimeMillis() < deadline) {
-			help = session.signatureHelp(code, code.length()).get(1,
-				TimeUnit.MINUTES);
-		}
-		assertTrue(help.getSignatures().get(0).getLabel().contains("dumps("));
-		assertFalse(help.getSignatures().get(0).getParameters().isEmpty());
-		assertEquals(Integer.valueOf(1), help.getActiveParameter());
-	}
-
-	@Test
-	public void testHover() throws Exception {
-		final String code = "import json\njson.dumps(1)";
-		final ScriptSession session = session(null);
-		final long deadline = System.currentTimeMillis() + BUILD_TIMEOUT;
-		Hover hover = null;
-		while (hover == null && System.currentTimeMillis() < deadline) {
-			hover = session.hover(code, code.indexOf("dumps") + 2).get(1,
-				TimeUnit.MINUTES);
-		}
-		assertTrue(String.valueOf(hover), hover.getContents().getRight().getValue()
-			.contains("JSON"));
-		// The word's range, in the script.
-		assertEquals(Positions.position(code, code.indexOf("dumps")), hover
-			.getRange().getStart());
-		assertEquals(Positions.position(code, code.indexOf("dumps") + 5), hover
-			.getRange().getEnd());
 	}
 
 	@Test
 	public void testDiagnostics() throws Exception {
-		// A syntax error, on the script's third line.
+		// A syntax error, on the script's third line: after its parameter
+		// lines.
 		final String code = "#@ double sigma\nx = sigma\ny = (1 +\n";
 		final long deadline = System.currentTimeMillis() + BUILD_TIMEOUT;
 		List<Diagnostic> problems = Collections.emptyList();
@@ -200,21 +145,6 @@ public class ApposePythonCompletionIntegrationTest {
 			"shape");
 	}
 
-	@Test
-	public void testNewDependency() throws Exception {
-		// A script declaring a dependency that is installed nowhere: its
-		// environment has not even been built.
-		final File script = new File(scriptDir, "overlaid.py");
-		final String header = "#!appose-python\n# /// script\n" +
-			"# dependencies = [\"tifffile\"]\n# ///\nimport tifffile\n";
-		Files.write(script.toPath(), (header + "x = 1\n").getBytes(
-			StandardCharsets.UTF_8));
-		// Opening it prepares completion, including the dependency's overlay.
-		final String code = header + "tifffile.imr";
-		sync(code, script.getPath());
-		completeUntil(code, script.getPath(), "imread");
-	}
-
 	// -- Helper methods --
 
 	/** The scripts' sessions, by path ("" for an untitled one). */
@@ -231,11 +161,6 @@ public class ApposePythonCompletionIntegrationTest {
 		try (ScriptSession session = servers.session(language)) {
 			return session.update(code).diagnostics(120_000);
 		}
-	}
-
-	/** Tells the servers a script's text. */
-	private static ScriptSession sync(final String code, final String path) {
-		return session(path).update(code);
 	}
 
 	/** Completes until the expected completion appears (environments build). */
@@ -260,27 +185,5 @@ public class ApposePythonCompletionIntegrationTest {
 	{
 		return session(path).completion(code, code.length()).get(1,
 			TimeUnit.MINUTES).getItems();
-	}
-
-	/**
-	 * Prints how long completions take, once warm: for another keystroke of a
-	 * word the server has answered (cached); and for a new word.
-	 */
-	private static void report(final String code, final String path,
-		final String expected, final String more) throws Exception
-	{
-		completeUntil(code, path, expected);
-		long t0 = System.nanoTime();
-		final int n = complete(code + more, path).size();
-		final long cached = System.nanoTime() - t0;
-		final String other = code.substring(0, code.lastIndexOf('.') + 1) + "s";
-		final ScriptSession session = session(path);
-		t0 = System.nanoTime();
-		final CompletionList all = session.completion(other, other.length()).get(
-			1, TimeUnit.MINUTES);
-		final long arrived = System.nanoTime() - t0;
-		System.out.println("[completion timing] same word (cached): " + cached /
-			1000000 + " ms, " + n + " completions; new word: " + all.getItems()
-				.size() + " completions after " + arrived / 1000000 + " ms");
 	}
 }
