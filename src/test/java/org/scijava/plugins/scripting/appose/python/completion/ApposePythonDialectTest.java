@@ -219,13 +219,13 @@ public class ApposePythonDialectTest {
 
 	@Test
 	public void testPythonTypes() {
-		assertEquals("numpy.ndarray", DIALECT.runtimeType(Img.class));
-		assertEquals("float", DIALECT.runtimeType(double.class));
-		assertEquals("int", DIALECT.runtimeType(Long.class));
-		assertEquals("str", DIALECT.runtimeType(String.class));
-		assertEquals("bool", DIALECT.runtimeType(boolean.class));
-		assertEquals("list", DIALECT.runtimeType(int[].class));
-		assertNull(DIALECT.runtimeType(Context.class));
+		assertEquals("numpy.ndarray", DIALECT.parameterType(Img.class));
+		assertEquals("float", DIALECT.parameterType(double.class));
+		assertEquals("int", DIALECT.parameterType(Long.class));
+		assertEquals("str", DIALECT.parameterType(String.class));
+		assertEquals("bool", DIALECT.parameterType(boolean.class));
+		assertEquals("list", DIALECT.parameterType(int[].class));
+		assertNull(DIALECT.parameterType(Context.class));
 	}
 
 	// -- Helper methods --
