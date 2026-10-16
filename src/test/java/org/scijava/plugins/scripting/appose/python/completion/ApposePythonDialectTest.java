@@ -34,8 +34,11 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import java.io.File;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import net.imglib2.img.Img;
 
@@ -43,10 +46,9 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.scijava.Context;
-import org.scijava.code.lsp.LanguageServerService;
 import org.scijava.code.lsp.Environment;
 import org.scijava.code.lsp.ScriptDialect;
-import org.scijava.code.lsp.ScriptDocument;
+import org.scijava.code.lsp.ScriptDialect.Header;
 import org.scijava.plugin.PluginService;
 import org.scijava.plugins.scripting.appose.python.ScriptEnvironment;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerService;
@@ -54,15 +56,11 @@ import org.scijava.script.ScriptLanguage;
 import org.scijava.script.ScriptService;
 
 /**
- * Tests what {@link ApposePythonDialect} tells Python language servers about
- * Python scripts run via Appose (the script as plain Python, and where it
- * runs), without starting any server process.
+ * Tests {@link ApposePythonDialect}.
  *
  * @author Gabriel Selzer
  */
 public class ApposePythonDialectTest {
-
-	private static final ApposePythonDialect DIALECT = new ApposePythonDialect();
 
 	private Context context;
 	private ScriptLanguage language;
@@ -70,8 +68,7 @@ public class ApposePythonDialectTest {
 
 	@Before
 	public void setUp() {
-		context = new Context(ScriptService.class, LanguageServerService.class,
-			ResidentWorkerService.class, LanguageServerService.class);
+		context = new Context(ScriptService.class, ResidentWorkerService.class);
 		language = context.service(ScriptService.class).getLanguageByName(
 			"appose-python");
 		dialect = context.service(PluginService.class).createInstancesOfType(
@@ -87,23 +84,48 @@ public class ApposePythonDialectTest {
 	}
 
 	@Test
-	public void testServersAreOffered() {
-		// Its scripts are plain Python, which scijava-code-lsp-jedi serves.
+	public void testScriptsLanguageAdherence() {
+		// Ensure the dialect supports the Appose Python script language
 		assertTrue(dialect.supports(language));
-		assertEquals("python", dialect.languageId());
-		assertTrue(context.service(LanguageServerService.class).supports(
-			language));
 	}
 
 	@Test
-	public void testScriptAsPython() {
-		final String code = "#@ net.imglib2.img.Img image\n#@ double sigma\n" +
-			"image.sha";
-		// The script's parameters are typed in a preamble, so the servers know
-		// them.
-		assertTrue(document(code).text().startsWith(
-			"import appose.python_worker; import numpy; image: numpy.ndarray; " +
-				"sigma: float; task: appose.python_worker.Task\n"));
+	public void testParameterType() {
+		// Script parameters have the types Appose converts them to
+		assertEquals("numpy.ndarray", ApposePythonDialect.parameterType(
+			Img.class));
+		assertEquals("float", ApposePythonDialect.parameterType(double.class));
+		assertEquals("int", ApposePythonDialect.parameterType(Long.class));
+		assertEquals("str", ApposePythonDialect.parameterType(String.class));
+		assertEquals("bool", ApposePythonDialect.parameterType(boolean.class));
+		assertEquals("list", ApposePythonDialect.parameterType(int[].class));
+		assertEquals("dict", ApposePythonDialect.parameterType(Map.class));
+		// Types Appose cannot convert are not declared
+		assertNull(ApposePythonDialect.parameterType(Context.class));
+	}
+
+	@Test
+	public void testHeader() {
+		// SciJava Script parameters should be declared in Python code with the
+		// types Appose converts them to, e.g. "image: numpy.ndarray"; and
+		// scripts can use Appose's task variable
+		final Map<String, Class<?>> parameters = new LinkedHashMap<>();
+		parameters.put("image", Img.class);
+		parameters.put("sigma", double.class);
+		parameters.put("context", Context.class);
+		Header header = dialect.header(parameters);
+		assertEquals("import appose.python_worker; import numpy; " +
+			"image: numpy.ndarray; sigma: float; " +
+			"task: appose.python_worker.Task", header.code());
+		// The imports' names are the header's alone
+		assertEquals(Arrays.asList("appose", "numpy"), Arrays.asList(header
+			.hiddenNames().toArray()));
+		// numpy is imported only when a parameter needs it
+		header = dialect.header(Collections.singletonMap("sigma",
+			double.class));
+		assertEquals("import appose.python_worker; sigma: float; " +
+			"task: appose.python_worker.Task", header.code());
+		assertEquals(Collections.singleton("appose"), header.hiddenNames());
 	}
 
 	@Test
@@ -217,24 +239,7 @@ public class ApposePythonDialectTest {
 		}
 	}
 
-	@Test
-	public void testPythonTypes() {
-		assertEquals("numpy.ndarray", DIALECT.parameterType(Img.class));
-		assertEquals("float", DIALECT.parameterType(double.class));
-		assertEquals("int", DIALECT.parameterType(Long.class));
-		assertEquals("str", DIALECT.parameterType(String.class));
-		assertEquals("bool", DIALECT.parameterType(boolean.class));
-		assertEquals("list", DIALECT.parameterType(int[].class));
-		assertNull(DIALECT.parameterType(Context.class));
-	}
-
 	// -- Helper methods --
-
-	/** The script as plain Python, as its servers see it. */
-	private ScriptDocument document(final String code) {
-		return ScriptDocument.of(code, context.service(LanguageServerService.class)
-			.scriptParameters(code), dialect);
-	}
 
 	private static void delete(final java.nio.file.Path dir) throws Exception {
 		try (java.util.stream.Stream<java.nio.file.Path> paths =

@@ -34,7 +34,6 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -57,6 +56,9 @@ import org.scijava.script.ScriptLanguage;
  */
 @Plugin(type = ScriptDialect.class, name = "Appose-Python")
 public class ApposePythonDialect implements ScriptDialect {
+
+	/** The type of images, as Appose passes them. */
+	private static final String NDARRAY = "numpy.ndarray";
 
 	/** The type of the {@code task} variable scripts can use. */
 	private static final String TASK_TYPE = "appose.python_worker.Task";
@@ -84,9 +86,41 @@ public class ApposePythonDialect implements ScriptDialect {
 	}
 
 	@Override
-	public String parameterType(final Class<?> type) {
+	public Header header(final Map<String, Class<?>> parameters) {
+		final List<String> code = new ArrayList<>();
+		final List<String> hidden = new ArrayList<>();
+		// Each Appose-Python script has access to its task
+		code.add("import appose.python_worker");
+		hidden.add("appose");
+		// And numpy is imported for the server whenever an image parameter is
+		// provided (the script itself does not get it)
+		if (parameters.values().stream().map(ApposePythonDialect::parameterType)
+			.anyMatch(NDARRAY::equals))
+		{
+			code.add("import numpy");
+			hidden.add("numpy");
+		}
+		// Declare the types of each parameter for type reasoning
+		parameters.forEach((name, type) -> {
+			final String t = parameterType(type);
+			// NB: Values Appose cannot pass are not declared.
+			if (t != null) code.add(name + ": " + t);
+		});
+		// Declare the type of task for type reasoning
+		code.add("task: " + TASK_TYPE);
+		// Combine into a Header
+		return new Header(String.join("; ", code), hidden);
+	}
+
+	/**
+	 * @param type the Java type (of a SciJava Script parameter) declared in the
+	 *          script
+	 * @return the Python type of the object given to the script by Appose, or
+	 *         null if Appose cannot pass it
+	 */
+	static String parameterType(final Class<?> type) {
 		if (RandomAccessibleInterval.class.isAssignableFrom(type) || NDArray.class
-			.isAssignableFrom(type)) return "numpy.ndarray";
+			.isAssignableFrom(type)) return NDARRAY;
 		if (type == boolean.class || type == Boolean.class) return "bool";
 		if (type == int.class || type == long.class || type == short.class ||
 			type == byte.class || type == Integer.class || type == Long.class ||
@@ -106,31 +140,6 @@ public class ApposePythonDialect implements ScriptDialect {
 		}
 		if (Map.class.isAssignableFrom(type)) return "dict";
 		return null;
-	}
-
-	@Override
-	public String declare(final String name, final String type) {
-		return name + ": " + type;
-	}
-
-	@Override
-	public List<String> imports(final Collection<String> types) {
-		final List<String> imports = new ArrayList<>();
-		imports.add("import appose.python_worker");
-		if (types.contains("numpy.ndarray")) imports.add("import numpy");
-		return imports;
-	}
-
-	@Override
-	public String imported(final String statement) {
-		// NB: "import a.b" binds a.
-		return statement.startsWith("import ") ? statement.substring(7).split(
-			"[.\\s]")[0] : null;
-	}
-
-	@Override
-	public List<String> extraDeclarations() {
-		return Collections.singletonList(declare("task", TASK_TYPE));
 	}
 
 	/** Gets where scripts run, creating it on first use. */
