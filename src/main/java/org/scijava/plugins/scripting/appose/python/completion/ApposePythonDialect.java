@@ -84,8 +84,7 @@ public class ApposePythonDialect implements ScriptDialect {
 	}
 
 	@Override
-	public String runtimeType(final Class<?> type) {
-		if (type == null) return null;
+	public String parameterType(final Class<?> type) {
 		if (RandomAccessibleInterval.class.isAssignableFrom(type) || NDArray.class
 			.isAssignableFrom(type)) return "numpy.ndarray";
 		if (type == boolean.class || type == Boolean.class) return "bool";
