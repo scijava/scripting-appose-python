@@ -39,6 +39,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import net.imglib2.img.Img;
 
@@ -131,7 +132,8 @@ public class ApposePythonDialectTest {
 	@Test
 	public void testEnvironmentWithoutOne() {
 		// No script environment has been built: the server's own Python.
-		final Environment env = dialect.environment("import os\nos.pa", null);
+		final Environment env = dialect.environment("import os\nos.pa", Optional
+			.empty());
 		assertNull(env.interpreter());
 		assertTrue(env.paths().isEmpty());
 	}
@@ -142,8 +144,9 @@ public class ApposePythonDialectTest {
 		// it, even as its metadata is edited.
 		final String script = "# /// script\n# dependencies = [\"appose\"]\n" +
 			"# ///\nimport os\nos.pa";
-		dialect.environment(script, null);
-		dialect.environment(script.replace("appose", "appose, numpy"), null);
+		dialect.environment(script, Optional.empty());
+		dialect.environment(script.replace("appose", "appose, numpy"), Optional
+			.empty());
 		assertTrue(context.service(ResidentWorkerService.class).workers()
 			.isEmpty());
 	}
@@ -167,7 +170,8 @@ public class ApposePythonDialectTest {
 			java.nio.file.Files.createDirectories(python.getParent());
 			java.nio.file.Files.createFile(python);
 
-			final Environment env = dialect.environment(header + "numpy.ze", script);
+			final Environment env = dialect.environment(header + "numpy.ze",
+				Optional.of(script));
 			// The server analyzes against the environment's Python...
 			assertEquals(python.toFile().getAbsolutePath(), env.interpreter());
 			// ...without anything built or started.
