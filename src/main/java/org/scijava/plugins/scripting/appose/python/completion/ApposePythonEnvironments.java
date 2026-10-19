@@ -89,7 +89,7 @@ final class ApposePythonEnvironments {
 	{
 		final String python = scriptPython(text, path);
 		return python == null ? org.scijava.code.lsp.Environment.NONE
-			: new org.scijava.code.lsp.Environment(python, null, null);
+			: new org.scijava.code.lsp.Environment(python, null);
 	}
 
 	/**
