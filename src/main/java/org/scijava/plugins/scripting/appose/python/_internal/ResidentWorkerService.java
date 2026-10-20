@@ -33,6 +33,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -76,6 +78,9 @@ public class ResidentWorkerService extends AbstractService implements
 	/** Environments by name and activation, each with its configuration and worker. */
 	private final Map<String, Entry> entries = new HashMap<>();
 
+	/** Whether the context was disposed: no more workers are made. */
+	private boolean disposed;
+
 	/** Told about every environment's builds. */
 	private final List<BuildListener> buildListeners =
 		new CopyOnWriteArrayList<>();
@@ -104,12 +109,18 @@ public class ResidentWorkerService extends AbstractService implements
 		final ResidentWorker stale;
 		final ResidentWorker worker;
 		final String key = key(name, activate);
+		// NB: The environment is rebuilt in place: only once the stale worker,
+		// still using it, has ended.
+		final CompletableFuture<Void> staleEnded = new CompletableFuture<>();
 		synchronized (entries) {
+			if (disposed) {
+				throw new IllegalStateException("The context was disposed");
+			}
 			final Entry entry = entries.get(key);
 			if (entry != null && entry.config.equals(config)) return entry.worker;
 			stale = entry == null ? null : entry.worker;
 			final LazyEnvironment env = new LazyEnvironment(name, builder.get(),
-				activate);
+				activate, staleEnded);
 			env.addBuildListener(SciJavaTasks.buildListener(taskService,
 				statusService, log));
 			env.addBuildListener(new BuildListener() {
@@ -124,7 +135,9 @@ public class ResidentWorkerService extends AbstractService implements
 			worker = new ResidentWorker(env, launcher);
 			entries.put(key, new Entry(config, worker));
 		}
-		if (stale != null) stale.release();
+		if (stale == null) staleEnded.complete(null);
+		else stale.release().whenComplete((v, exc) -> staleEnded.complete(
+			null));
 		return worker;
 	}
 
@@ -158,6 +171,24 @@ public class ResidentWorkerService extends AbstractService implements
 		}
 	}
 
+	/**
+	 * Gets the resident worker of the named environment with the given
+	 * activation, whatever its configuration: e.g. to wait, via its
+	 * {@link ResidentWorker#exclusive()} lock, for a script it runs before
+	 * replacing it.
+	 *
+	 * @param name Name of the environment.
+	 * @param activate Name of the activated sub-environment, or null for none.
+	 */
+	public Optional<ResidentWorker> current(final String name,
+		final String activate)
+	{
+		synchronized (entries) {
+			final Entry entry = entries.get(key(name, activate));
+			return entry == null ? Optional.empty() : Optional.of(entry.worker);
+		}
+	}
+
 	/** The key of the named environment's worker with the given activation. */
 	private static String key(final String name, final String activate) {
 		return activate == null ? name : name + "\0" + activate;
@@ -187,6 +218,7 @@ public class ResidentWorkerService extends AbstractService implements
 		releaseAll();
 		synchronized (entries) {
 			entries.clear();
+			disposed = true;
 		}
 	}
 
