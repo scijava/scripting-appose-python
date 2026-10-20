@@ -41,6 +41,7 @@ import java.util.Optional;
 import net.imglib2.RandomAccessibleInterval;
 
 import org.apposed.appose.NDArray;
+import org.apposed.appose.util.Environments;
 import org.scijava.code.lsp.Environment;
 import org.scijava.code.lsp.ScriptDialect;
 import org.scijava.plugin.Parameter;
@@ -51,7 +52,8 @@ import org.scijava.script.ScriptLanguage;
 
 /**
  * Describes how to turn Appose python scripts into plain python code, and
- * where they run (see {@link ApposePythonEnvironments}).
+ * where they run (see {@link ApposePythonEnvironments}), searching the
+ * packages they declare but that lacks, too (see {@link DependencyOverlays}).
  *
  * @author Gabriel Selzer
  */
@@ -69,6 +71,14 @@ public class ApposePythonDialect implements ScriptDialect {
 
 	private ApposePythonEnvironments environments;
 
+	/**
+	 * How long a script's dependencies must stay unchanged before packages
+	 * missing from its environment are installed for completion, in ms.
+	 */
+	private static final long OVERLAY_SETTLE = 1500;
+
+	private static DependencyOverlays overlays;
+
 	@Override
 	public boolean supports(final ScriptLanguage language) {
 		return language instanceof ApposePythonScriptLanguage;
@@ -83,9 +93,12 @@ public class ApposePythonDialect implements ScriptDialect {
 	public Environment environment(final String text,
 		final Optional<File> file)
 	{
-		// NB: As its #@script line, or its inline metadata, says.
-		return environments().environment(text, file.map(File::getPath).orElse(
-			null));
+		// NB: As its #@script line, or its inline metadata, says; plus the
+		// packages it declares but that environment lacks (installed for
+		// completion only, see DependencyOverlays).
+		final String path = file.map(File::getPath).orElse(null);
+		return overlays().environment(text, path, environments().environment(
+			text, path));
 	}
 
 	@Override
@@ -143,6 +156,19 @@ public class ApposePythonDialect implements ScriptDialect {
 		}
 		if (Map.class.isAssignableFrom(type)) return "dict";
 		return null;
+	}
+
+	/**
+	 * Gets the overlays of packages scripts declare, but their environments
+	 * lack: one set, for all dialect instances (sessions).
+	 */
+	private static synchronized DependencyOverlays overlays() {
+		if (overlays == null) {
+			overlays = new DependencyOverlays(DependencyOverlays::install, new File(
+				Environments.apposeEnvsDir(), "appose-python-completion-overlays"),
+				OVERLAY_SETTLE, System::currentTimeMillis);
+		}
+		return overlays;
 	}
 
 	/** Gets where scripts run, creating it on first use. */

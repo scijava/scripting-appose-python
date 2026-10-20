@@ -64,9 +64,9 @@ import org.scijava.script.ScriptService;
  * {@link LanguageServerService}, as editors use it: what is particular to
  * these scripts.
  * <p>
- * The first completion builds jedi-language-server's environment, and a
- * script run the small uv environment of {@code appose-test/requirements.txt};
- * both require network access.
+ * The first completion builds jedi-language-server's environment, a script
+ * run the small uv environment of {@code appose-test/requirements.txt}, and a
+ * new dependency installs an overlay; all require network access.
  * </p>
  *
  * @author Gabriel Selzer
@@ -145,6 +145,15 @@ public class ApposePythonCompletionIntegrationTest {
 			"shape");
 	}
 
+	@Test
+	public void testNewDependency() throws Exception {
+		// A script declaring a dependency that is installed nowhere: installed
+		// for completion only (in an overlay), once the dependencies settle.
+		final String header = "# /// script\n# dependencies = [\"tifffile\"]\n" +
+			"# ///\nimport tifffile\n";
+		completeUntil(header + "tifffile.imr", null, "imread");
+	}
+
 	// -- Helper methods --
 
 	/** The scripts' sessions, by path ("" for an untitled one). */
@@ -152,13 +161,14 @@ public class ApposePythonCompletionIntegrationTest {
 
 	/** The session about a script (null path: untitled). */
 	private static ScriptSession session(final String path) {
-		return sessions.computeIfAbsent(path == null ? "" : path, p -> servers
-			.session(language).setFile(() -> path == null ? null : new File(path)));
+		return sessions.computeIfAbsent(path == null ? "" : path,
+			p -> new ScriptSession(servers, language).setFile(() -> path == null
+				? null : new File(path)));
 	}
 
 	/** The problems found in a script, in a session of its own. */
 	private static List<Diagnostic> problems(final String code) {
-		try (ScriptSession session = servers.session(language)) {
+		try (ScriptSession session = new ScriptSession(servers, language)) {
 			return session.update(code).diagnostics(120_000);
 		}
 	}
