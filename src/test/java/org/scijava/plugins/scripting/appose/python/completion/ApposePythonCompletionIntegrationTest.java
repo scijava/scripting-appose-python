@@ -66,7 +66,8 @@ import org.scijava.script.ScriptService;
  * <p>
  * The first completion builds jedi-language-server's environment, a script
  * run the small uv environment of {@code appose-test/requirements.txt}, and a
- * new dependency installs an overlay; all require network access.
+ * script declaring a new dependency its own environment; all require network
+ * access.
  * </p>
  *
  * @author Gabriel Selzer
@@ -147,8 +148,9 @@ public class ApposePythonCompletionIntegrationTest {
 
 	@Test
 	public void testNewDependency() throws Exception {
-		// A script declaring a dependency that is installed nowhere: installed
-		// for completion only (in an overlay), once the dependencies settle.
+		// A script declaring a dependency that is installed nowhere: its
+		// environment is built, in the background, once its dependencies have
+		// settled; then its servers analyze the script there.
 		final String header = "# /// script\n# dependencies = [\"tifffile\"]\n" +
 			"# ///\nimport tifffile\n";
 		completeUntil(header + "tifffile.imr", null, "imread");

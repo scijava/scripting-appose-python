@@ -32,14 +32,18 @@ package org.scijava.plugins.scripting.appose.python._internal;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 import java.io.File;
+import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.apposed.appose.Appose;
+import org.apposed.appose.BuildException;
 import org.apposed.appose.Builder;
 import org.junit.Test;
 
@@ -93,9 +97,54 @@ public class ResidentWorkerTest {
 		}
 	}
 
+	@Test
+	public void testBuildWaitsForEarlierWorker() throws Exception {
+		// An environment whose earlier worker is still ending: not rebuilt
+		// beneath it, but once it has ended.
+		final CompletableFuture<Void> ended = new CompletableFuture<>();
+		final AtomicInteger builds = new AtomicInteger();
+		final LazyEnvironment env = new LazyEnvironment("test", fakeBuilder(
+			builds), ended);
+		final Thread building = new Thread(() -> {
+			try {
+				env.get();
+			}
+			catch (final BuildException exc) {
+				throw new RuntimeException(exc);
+			}
+		});
+		building.start();
+		Thread.sleep(200);
+		assertEquals(0, builds.get());
+		ended.complete(null);
+		building.join(10_000);
+		assertEquals(1, builds.get());
+	}
+
+	@Test
+	public void testReleaseEnds() {
+		// A worker never started: ended at once.
+		final ResidentWorker idle = new ResidentWorker(new LazyEnvironment(
+			"test", fakeBuilder(new AtomicInteger())), e -> e.python());
+		assertTrue(idle.release().isDone());
+	}
+
 	private static int pid(final ResidentWorker worker) throws Exception {
 		return ((Number) worker.task(PID, null).waitFor().outputs.get("pid"))
 			.intValue();
+	}
+
+	/** A builder counting its builds, building nothing. */
+	private static Builder<?> fakeBuilder(final AtomicInteger builds) {
+		return (Builder<?>) Proxy.newProxyInstance(Builder.class
+			.getClassLoader(), new Class<?>[] { Builder.class }, (proxy, method,
+				args) -> {
+				if (method.getName().equals("build")) {
+					builds.incrementAndGet();
+					return null;
+				}
+				return method.getReturnType().isInstance(proxy) ? proxy : null;
+			});
 	}
 
 	private static LazyEnvironment environment() throws Exception {

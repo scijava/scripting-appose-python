@@ -32,6 +32,9 @@ package org.scijava.plugins.scripting.appose.python._internal;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
@@ -60,6 +63,14 @@ import org.apposed.appose.Service;
  * </p>
  */
 public class ResidentWorker implements AutoCloseable {
+
+	/** Where released workers are waited for, until their processes end. */
+	private static final ExecutorService EXITS = Executors.newCachedThreadPool(
+		r -> {
+			final Thread t = new Thread(r, "appose-worker-exit");
+			t.setDaemon(true);
+			return t;
+		});
 
 	private final LazyEnvironment environment;
 	private final Function<Environment, Service> launcher;
@@ -141,11 +152,23 @@ public class ResidentWorker implements AutoCloseable {
 	/**
 	 * Ends the worker process gently, letting pending tasks finish, and
 	 * releasing everything it holds. The environment stays built.
+	 *
+	 * @return When the process has ended (at once, if none was running): e.g.
+	 *         so that its environment is not rebuilt while it still uses it.
 	 */
-	public synchronized void release() {
-		if (service == null) return;
-		service.close();
+	public synchronized CompletableFuture<Void> release() {
+		if (service == null) return CompletableFuture.completedFuture(null);
+		final Service s = service;
+		s.close();
 		service = null;
+		return CompletableFuture.runAsync(() -> {
+			try {
+				s.waitFor();
+			}
+			catch (final InterruptedException exc) {
+				Thread.currentThread().interrupt();
+			}
+		}, EXITS);
 	}
 
 	/** Ends the worker process immediately, interrupting any pending tasks. */

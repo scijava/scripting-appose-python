@@ -31,7 +31,11 @@ package org.scijava.plugins.scripting.appose.python._internal;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import org.apposed.appose.BuildException;
@@ -45,6 +49,8 @@ import org.apposed.appose.Environment;
  * Builds of environments with the same name are serialized, even across
  * instances, because they share a directory on disk: e.g. when the
  * environment's configuration changes while an older build is still running.
+ * For the same reason, a build may wait for a worker of the environment's
+ * earlier configuration to end, so as not to rebuild beneath it.
  * </p>
  */
 public class LazyEnvironment {
@@ -53,8 +59,20 @@ public class LazyEnvironment {
 	private static final Map<String, Object> BUILD_LOCKS =
 		new ConcurrentHashMap<>();
 
+	/** The names of the environments being built now. */
+	private static final Set<String> BUILDING = ConcurrentHashMap.newKeySet();
+
+	/**
+	 * Whether the named environment is being built now: if so, its files are
+	 * not to be used yet (e.g. its Python may exist before its packages do).
+	 */
+	public static boolean isBuilding(final String name) {
+		return BUILDING.contains(name);
+	}
+
 	private final String name;
 	private final Builder<?> builder;
+	private final Future<?> before;
 	private final List<BuildListener> listeners = new CopyOnWriteArrayList<>();
 
 	private volatile Environment env;
@@ -65,7 +83,21 @@ public class LazyEnvironment {
 	 * @param builder Builder for the environment; built on first use.
 	 */
 	public LazyEnvironment(final String name, final Builder<?> builder) {
+		this(name, builder, CompletableFuture.completedFuture(null));
+	}
+
+	/**
+	 * @param name Name of the environment, as reported to listeners, and as
+	 *          given to the builder.
+	 * @param builder Builder for the environment; built on first use.
+	 * @param before What to wait for before building: e.g. the end of a worker
+	 *          still using the environment's earlier configuration.
+	 */
+	public LazyEnvironment(final String name, final Builder<?> builder,
+		final Future<?> before)
+	{
 		this.name = name;
+		this.before = before;
 		// Note: Subscribe once, here, and dispatch to the current listeners,
 		// because builders accumulate subscribers with every call.
 		this.builder = builder.name(name) //
@@ -96,13 +128,28 @@ public class LazyEnvironment {
 		if (env != null) return env;
 		synchronized (BUILD_LOCKS.computeIfAbsent(name, k -> new Object())) {
 			if (env != null) return env;
+			try {
+				before.get();
+			}
+			catch (final InterruptedException exc) {
+				Thread.currentThread().interrupt();
+				throw new BuildException("Interrupted waiting to build " + name,
+					exc);
+			}
+			catch (final ExecutionException exc) {
+				// NB: Whatever it was could not be waited for: build anyway.
+			}
 			listeners.forEach(l -> l.buildStarted(name));
+			BUILDING.add(name);
 			try {
 				env = builder.build();
 			}
 			catch (final BuildException | RuntimeException exc) {
 				listeners.forEach(l -> l.buildFinished(name, exc));
 				throw exc;
+			}
+			finally {
+				BUILDING.remove(name);
 			}
 			listeners.forEach(l -> l.buildFinished(name, null));
 			return env;

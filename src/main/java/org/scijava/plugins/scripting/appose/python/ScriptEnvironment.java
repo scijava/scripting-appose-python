@@ -41,6 +41,8 @@ import java.util.regex.Pattern;
 import org.apposed.appose.Appose;
 import org.apposed.appose.Builder;
 import org.scijava.plugins.scripting.appose.python._internal.InlineMetadata;
+import org.scijava.plugins.scripting.appose.python._internal.ResidentWorker;
+import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerService;
 
 /**
  * The Appose environment a script declares: either inline, via a PEP 723
@@ -172,6 +174,18 @@ public final class ScriptEnvironment {
 	 */
 	public String config() {
 		return scheme + "\n" + content;
+	}
+
+	/**
+	 * Gets the resident worker of this environment (see
+	 * {@link ResidentWorkerService#worker}), as scripts run it: replacing the
+	 * environment's worker of an earlier configuration, if any. The
+	 * environment is built by the worker's first task, or when asked (see
+	 * {@link ResidentWorker#environment()}).
+	 */
+	public ResidentWorker worker(final ResidentWorkerService workers) {
+		return workers.worker(name, config(), this::builder,
+			ApposePythonScriptEngine::launch);
 	}
 
 	/** Creates a builder for the environment. */

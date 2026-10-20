@@ -455,8 +455,7 @@ public class ApposePythonScriptEngine extends AbstractScriptEngine {
 			throw scriptException(e.getMessage(), e);
 		}
 		if (env == null) throw noEnvironment();
-		return workerService.worker(env.name, env.config(), env::builder,
-			ApposePythonScriptEngine::launch);
+		return env.worker(workerService);
 	}
 
 	/** Creates the service of a worker in the given (built) environment. */
