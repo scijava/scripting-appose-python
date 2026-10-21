@@ -41,6 +41,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import org.eclipse.lsp4j.CompletionItem;
@@ -164,14 +165,23 @@ public class ApposePythonCompletionIntegrationTest {
 	/** The session about a script (null path: untitled). */
 	private static ScriptSession session(final String path) {
 		return sessions.computeIfAbsent(path == null ? "" : path,
-			p -> new ScriptSession(servers, language).setFile(() -> path == null
-				? null : new File(path)));
+			p -> {
+				final ScriptSession session = new ScriptSession(servers, language);
+				session.setFile(() -> path == null ? null : new File(path));
+				return session;
+			});
 	}
 
 	/** The problems found in a script, in a session of its own. */
-	private static List<Diagnostic> problems(final String code) {
+	private static List<Diagnostic> problems(final String code)
+		throws Exception
+	{
+		final CompletableFuture<List<Diagnostic>> found =
+			new CompletableFuture<>();
 		try (ScriptSession session = new ScriptSession(servers, language)) {
-			return session.update(code).diagnostics(120_000);
+			session.setDiagnosticsListener(found::complete);
+			session.update(code);
+			return found.get(120, TimeUnit.SECONDS);
 		}
 	}
 
