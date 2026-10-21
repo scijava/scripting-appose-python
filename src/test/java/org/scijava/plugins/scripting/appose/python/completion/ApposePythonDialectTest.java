@@ -134,7 +134,7 @@ public class ApposePythonDialectTest {
 		// No script environment has been built: the server's own Python.
 		final Environment env = dialect.environment("import os\nos.pa", Optional
 			.empty());
-		assertNull(env.interpreter());
+		assertEquals(Optional.empty(), env.interpreter());
 		assertTrue(env.paths().isEmpty());
 	}
 
@@ -174,7 +174,8 @@ public class ApposePythonDialectTest {
 			final Environment env = dialect.environment(header + "numpy.ze",
 				Optional.of(script));
 			// The server analyzes against the environment's Python...
-			assertEquals(python.toFile().getAbsolutePath(), env.interpreter());
+			assertEquals(Optional.of(python.toFile().getAbsolutePath()), env
+				.interpreter());
 			// ...without anything built or started.
 			assertTrue(context.service(ResidentWorkerService.class).workers()
 				.isEmpty());

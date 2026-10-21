@@ -33,6 +33,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -152,8 +153,8 @@ final class ApposePythonEnvironments {
 		final String path)
 	{
 		final String python = scriptPython(text, path);
-		return python == null ? org.scijava.code.lsp.Environment.NONE
-			: new org.scijava.code.lsp.Environment(python, null);
+		return python == null ? new org.scijava.code.lsp.Environment()
+			: new org.scijava.code.lsp.Environment().withInterpreter(python);
 	}
 
 	/**
