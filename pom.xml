@@ -92,7 +92,8 @@
 		<appose.version>0.12.0</appose.version>
 		<imglib2-appose.version>0.9.0</imglib2-appose.version>
 
-		<!-- TEMP: for Task#log(); drop once propagated to pom-scijava. -->
+		<!-- TEMP: Remove once pom-scijava manages scijava-common 2.101.0.
+		     NB: Task#log() needs it. -->
 		<scijava-common.version>2.101.0</scijava-common.version>
 
 		<scijava-code-lsp.version>0.1.0-SNAPSHOT</scijava-code-lsp.version>
