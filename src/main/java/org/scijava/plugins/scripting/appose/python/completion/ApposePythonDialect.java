@@ -89,7 +89,7 @@ public class ApposePythonDialect implements ScriptDialect {
 	}
 
 	@Override
-	public Header header(final Map<String, Class<?>> parameters) {
+	public Header header(final Map<String, Variable> variables) {
 		final List<String> code = new ArrayList<>();
 		final List<String> hidden = new ArrayList<>();
 		// Each Appose-Python script has access to its task
@@ -97,15 +97,15 @@ public class ApposePythonDialect implements ScriptDialect {
 		hidden.add("appose");
 		// And numpy is imported for the server whenever an image parameter is
 		// provided (the script itself does not get it)
-		if (parameters.values().stream().map(ApposePythonDialect::parameterType)
+		if (variables.values().stream().map(v -> parameterType(v.type()))
 			.anyMatch(NDARRAY::equals))
 		{
 			code.add("import numpy");
 			hidden.add("numpy");
 		}
 		// Declare the types of each parameter for type reasoning
-		parameters.forEach((name, type) -> {
-			final String t = parameterType(type);
+		variables.forEach((name, v) -> {
+			final String t = parameterType(v.type());
 			// NB: Values Appose cannot pass are not declared.
 			if (t != null) code.add(name + ": " + t);
 		});

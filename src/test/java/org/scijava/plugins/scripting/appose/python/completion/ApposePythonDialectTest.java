@@ -50,6 +50,7 @@ import org.scijava.Context;
 import org.scijava.code.lsp.Environment;
 import org.scijava.code.lsp.ScriptDialect;
 import org.scijava.code.lsp.ScriptDialect.Header;
+import org.scijava.code.lsp.ScriptDialect.Variable;
 import org.scijava.plugin.PluginService;
 import org.scijava.plugins.scripting.appose.python.ScriptEnvironment;
 import org.scijava.plugins.scripting.appose.python._internal.ResidentWorkerService;
@@ -110,10 +111,10 @@ public class ApposePythonDialectTest {
 		// SciJava Script parameters should be declared in Python code with the
 		// types Appose converts them to, e.g. "image: numpy.ndarray"; and
 		// scripts can use Appose's task variable
-		final Map<String, Class<?>> parameters = new LinkedHashMap<>();
-		parameters.put("image", Img.class);
-		parameters.put("sigma", double.class);
-		parameters.put("context", Context.class);
+		final Map<String, Variable> parameters = new LinkedHashMap<>();
+		parameters.put("image", Variable.ofType(Img.class));
+		parameters.put("sigma", Variable.ofType(double.class));
+		parameters.put("context", Variable.ofType(Context.class));
 		Header header = dialect.header(parameters);
 		assertEquals("import appose.python_worker; import numpy; " +
 			"image: numpy.ndarray; sigma: float; " +
@@ -122,8 +123,8 @@ public class ApposePythonDialectTest {
 		assertEquals(Arrays.asList("appose", "numpy"), Arrays.asList(header
 			.hiddenNames().toArray()));
 		// numpy is imported only when a parameter needs it
-		header = dialect.header(Collections.singletonMap("sigma",
-			double.class));
+		header = dialect.header(Collections.singletonMap("sigma", Variable
+			.ofType(double.class)));
 		assertEquals("import appose.python_worker; sigma: float; " +
 			"task: appose.python_worker.Task", header.code());
 		assertEquals(Collections.singleton("appose"), header.hiddenNames());
