@@ -168,18 +168,18 @@ parameters declared. One server runs per script environment; servers
 unused for 10 minutes stop. Their error output goes to
 `code-lsp-ty-server.log`, next to Appose's environments.
 
-Once a script's environment is built, by running the script (in this session
-or an earlier one), the server analyzes the script against it, so that the packages
-installed there are known too. Packages the script declares (in its
-`# /// script` block) but its environment lacks, e.g. a dependency you just
-added, are installed for completion only, into a separate directory, a moment
-after you stop editing the dependencies; so they are known before you run the
-script. This
-covers PyPI packages; conda packages (`[tool.pixi.dependencies]`)
-and environments declared in files are known once the script has run.
-Completion never builds a script's environment itself, and never disturbs
-its worker. Script parameters are known by the Python types they have at run
-time, e.g. images as NumPy arrays.
+Once a script's environment is built (in this session or an earlier one),
+the server analyzes the script against it, so that the packages installed
+there are known too. An environment not built yet, e.g. because you just
+added a dependency, is built in the background once the script's environment
+declaration has stayed the same for a few seconds; so its packages are known
+before you run the script, and the next run need not build it. This covers
+every kind of declaration: PyPI and conda packages, and environment files.
+A script running in the environment is waited for first, so an environment
+is never rebuilt beneath a running script; building replaces the
+environment's worker, as the script's next run would. Script parameters are
+known by the Python types they have at run time, e.g. images as NumPy
+arrays.
 
 Typing never waits for the server: if its answer for a word is not ready
 within a moment (the first answer for a package can take a few seconds), it
