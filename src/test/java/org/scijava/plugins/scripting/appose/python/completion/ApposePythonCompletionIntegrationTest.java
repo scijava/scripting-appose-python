@@ -60,12 +60,12 @@ import org.scijava.script.ScriptService;
 
 /**
  * End-to-end tests of completing Python scripts run via Appose (see
- * {@link ApposePythonDialect}), with a real jedi-language-server (from
- * scijava-code-lsp-jedi, whose own tests test it on plain Python), through the
+ * {@link ApposePythonDialect}), with a real ty language server (from
+ * scijava-code-lsp-ty, whose own tests test it on plain Python), through the
  * {@link LanguageServerService}, as editors use it: what is particular to
  * these scripts.
  * <p>
- * The first completion builds jedi-language-server's environment, a script
+ * The first completion builds ty's environment, a script
  * run the small uv environment of {@code appose-test/requirements.txt}, and a
  * script declaring a new dependency its own environment; all require network
  * access.

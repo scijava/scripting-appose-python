@@ -97,7 +97,7 @@
 		<scijava-common.version>2.101.0</scijava-common.version>
 
 		<scijava-code-lsp.version>0.1.0-SNAPSHOT</scijava-code-lsp.version>
-		<scijava-code-lsp-jedi.version>0.1.0-SNAPSHOT</scijava-code-lsp-jedi.version>
+		<scijava-code-lsp-ty.version>0.1.0-SNAPSHOT</scijava-code-lsp-ty.version>
 	</properties>
 
 	<dependencies>
@@ -117,8 +117,8 @@
 		</dependency>
 		<dependency>
 			<groupId>org.scijava</groupId>
-			<artifactId>scijava-code-lsp-jedi</artifactId>
-			<version>${scijava-code-lsp-jedi.version}</version>
+			<artifactId>scijava-code-lsp-ty</artifactId>
+			<version>${scijava-code-lsp-ty.version}</version>
 			<!-- NB: For integration tests; applications choose their servers. -->
 			<scope>test</scope>
 		</dependency>
