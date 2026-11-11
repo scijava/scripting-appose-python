@@ -109,24 +109,25 @@ public class ApposePythonDialectTest {
 	@Test
 	public void testHeader() {
 		// SciJava Script parameters should be declared in Python code with the
-		// types Appose converts them to, e.g. "image: numpy.ndarray"; and
-		// scripts can use Appose's task variable
+		// types Appose converts them to, e.g. "image: numpy.ndarray" (assigned,
+		// so that servers take them to be bound); and scripts can use Appose's
+		// task variable
 		final Map<String, Variable> parameters = new LinkedHashMap<>();
 		parameters.put("image", Variable.ofType(Img.class));
 		parameters.put("sigma", Variable.ofType(double.class));
 		parameters.put("context", Variable.ofType(Context.class));
 		Header header = dialect.header(parameters);
 		assertEquals("import appose.python_worker; import numpy; " +
-			"image: numpy.ndarray; sigma: float; " +
-			"task: appose.python_worker.Task", header.code());
+			"image: numpy.ndarray = ...; sigma: float = ...; " +
+			"task: appose.python_worker.Task = ...", header.code());
 		// The imports' names are the header's alone
 		assertEquals(Arrays.asList("appose", "numpy"), Arrays.asList(header
 			.hiddenNames().toArray()));
 		// numpy is imported only when a parameter needs it
 		header = dialect.header(Collections.singletonMap("sigma", Variable
 			.ofType(double.class)));
-		assertEquals("import appose.python_worker; sigma: float; " +
-			"task: appose.python_worker.Task", header.code());
+		assertEquals("import appose.python_worker; sigma: float = ...; " +
+			"task: appose.python_worker.Task = ...", header.code());
 		assertEquals(Collections.singleton("appose"), header.hiddenNames());
 	}
 
