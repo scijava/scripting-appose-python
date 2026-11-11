@@ -103,14 +103,16 @@ public class ApposePythonDialect implements ScriptDialect {
 			code.add("import numpy");
 			hidden.add("numpy");
 		}
-		// Declare the types of each parameter for type reasoning
+		// Declare the types of each parameter for type reasoning. NB: Assigned
+		// (to ...), as well as annotated: some servers (e.g. ty) take a name that
+		// is only annotated to be unbound, and complete none of its members.
 		variables.forEach((name, v) -> {
 			final String t = parameterType(v.type());
 			// NB: Values Appose cannot pass are not declared.
-			if (t != null) code.add(name + ": " + t);
+			if (t != null) code.add(name + ": " + t + " = ...");
 		});
 		// Declare the type of task for type reasoning
-		code.add("task: " + TASK_TYPE);
+		code.add("task: " + TASK_TYPE + " = ...");
 		// Combine into a Header
 		return new Header(String.join("; ", code), hidden);
 	}
