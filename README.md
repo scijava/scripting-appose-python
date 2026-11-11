@@ -138,9 +138,8 @@ script's own line numbers.
 ## Code completion
 
 The Script Editor completes code in these scripts with a Python language
-server, `scijava-code-lsp-jedi`'s:
-[jedi-language-server](https://github.com/pappasam/jedi-language-server)
-(built on [Jedi](https://jedi.readthedocs.io/)). This plugin's
+server, `scijava-code-lsp-ty`'s: [ty](https://docs.astral.sh/ty/). This
+plugin's
 `ApposePythonDialect` shows it each script as plain Python, and says where
 the script runs (so any other client of `scijava-code-lsp`'s
 `LanguageServerService` gets the same). It completes names in scope,
@@ -148,15 +147,15 @@ the script's `#@` parameters, `task`, builtins and keywords, and members of
 objects and modules; and it gives function signatures (with parameter names
 and types), documentation, hover and syntax errors.
 
-The server runs in a small environment of its own (`code-lsp-jedi`: Python,
-Jedi, jedi-language-server, NumPy and uv), which is built in the background
+The server runs in a small environment of its own (`code-lsp-ty`: Python,
+NumPy and ty), which is built in the background
 the first time you complete code, and takes a while only then; until it is, there are no completions. The server
 talks to the editor via the
 [Language Server Protocol](https://microsoft.github.io/language-server-protocol/)
 (see `scijava-code-lsp`); it sees the script as plain Python, with its `#@`
 parameters declared. One server runs per script environment; servers
 unused for 10 minutes stop. Their error output goes to
-`code-lsp-jedi-server.log`, next to Appose's environments.
+`code-lsp-ty-server.log`, next to Appose's environments.
 
 Once a script's environment is built, by running the script (in this session
 or an earlier one), the server analyzes the script against it, so that the packages
@@ -164,7 +163,7 @@ installed there are known too. Packages the script declares (in its
 `# /// script` block) but its environment lacks, e.g. a dependency you just
 added, are installed for completion only, into a separate directory, a moment
 after you stop editing the dependencies; so they are known before you run the
-script. (`scijava-code-lsp-jedi` does this, for any Python script.) This
+script. This
 covers PyPI packages; conda packages (`[tool.pixi.dependencies]`)
 and environments declared in files are known once the script has run.
 Completion never builds a script's environment itself, and never disturbs
