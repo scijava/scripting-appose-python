@@ -36,7 +36,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 import net.imglib2.RandomAccessibleInterval;
 
@@ -80,12 +79,10 @@ public class ApposePythonDialect implements ScriptDialect {
 	}
 
 	@Override
-	public Environment environment(final String text,
-		final Optional<File> file)
-	{
+	public Environment environment(final String text, final File file) {
 		// NB: As its #@script line, or its inline metadata, says.
-		return environments().environment(text, file.map(File::getPath).orElse(
-			null));
+		return environments().environment(text, file == null ? null : file
+			.getPath());
 	}
 
 	@Override
