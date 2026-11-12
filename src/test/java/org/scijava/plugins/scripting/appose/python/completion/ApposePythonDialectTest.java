@@ -134,8 +134,7 @@ public class ApposePythonDialectTest {
 	@Test
 	public void testEnvironmentWithoutOne() {
 		// No script environment has been built: the server's own Python.
-		final Environment env = dialect.environment("import os\nos.pa", Optional
-			.empty());
+		final Environment env = dialect.environment("import os\nos.pa", null);
 		assertEquals(Optional.empty(), env.interpreter());
 		assertTrue(env.paths().isEmpty());
 	}
@@ -147,9 +146,8 @@ public class ApposePythonDialectTest {
 		// has settled (see ApposePythonEnvironmentsTest).
 		final String script = "# /// script\n# dependencies = [\"appose\"]\n" +
 			"# ///\nimport os\nos.pa";
-		dialect.environment(script, Optional.empty());
-		dialect.environment(script.replace("appose", "appose, numpy"), Optional
-			.empty());
+		dialect.environment(script, null);
+		dialect.environment(script.replace("appose", "appose, numpy"), null);
 		assertTrue(context.service(ResidentWorkerService.class).workers()
 			.isEmpty());
 	}
@@ -174,7 +172,7 @@ public class ApposePythonDialectTest {
 			java.nio.file.Files.createFile(python);
 
 			final Environment env = dialect.environment(header + "numpy.ze",
-				Optional.of(script));
+				script);
 			// The server analyzes against the environment's Python...
 			assertEquals(Optional.of(python.toFile().getAbsolutePath()), env
 				.interpreter());
