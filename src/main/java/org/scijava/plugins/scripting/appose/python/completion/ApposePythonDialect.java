@@ -60,8 +60,13 @@ public class ApposePythonDialect implements ScriptDialect {
 	/** The type of images, as Appose passes them. */
 	private static final String NDARRAY = "numpy.ndarray";
 
-	/** The type of the {@code task} variable scripts can use. */
-	private static final String TASK_TYPE = "appose.python_worker.Task";
+	/**
+	 * The names the header imports modules as: private, so that the header
+	 * binds no name a script might use itself (e.g. {@code numpy}, which a
+	 * script that does not import it cannot use).
+	 */
+	private static final String NUMPY = "_scijava_numpy",
+			WORKER = "_scijava_python_worker";
 
 	@Parameter(required = false)
 	private ResidentWorkerService workers;
@@ -90,15 +95,15 @@ public class ApposePythonDialect implements ScriptDialect {
 		final List<String> code = new ArrayList<>();
 		final List<String> hidden = new ArrayList<>();
 		// Each Appose-Python script has access to its task
-		code.add("import appose.python_worker");
-		hidden.add("appose");
+		code.add("import appose.python_worker as " + WORKER);
+		hidden.add(WORKER);
 		// And numpy is imported for the server whenever an image parameter is
 		// provided (the script itself does not get it)
 		if (variables.values().stream().map(v -> parameterType(v.type()))
 			.anyMatch(NDARRAY::equals))
 		{
-			code.add("import numpy");
-			hidden.add("numpy");
+			code.add("import numpy as " + NUMPY);
+			hidden.add(NUMPY);
 		}
 		// Declare the types of each parameter for type reasoning. NB: Assigned
 		// (to ...), as well as annotated: some servers (e.g. ty) take a name that
@@ -106,10 +111,12 @@ public class ApposePythonDialect implements ScriptDialect {
 		variables.forEach((name, v) -> {
 			final String t = parameterType(v.type());
 			// NB: Values Appose cannot pass are not declared.
-			if (t != null) code.add(name + ": " + t + " = ...");
+			if (t == null) return;
+			final String declared = NDARRAY.equals(t) ? NUMPY + ".ndarray" : t;
+			code.add(name + ": " + declared + " = ...");
 		});
 		// Declare the type of task for type reasoning
-		code.add("task: " + TASK_TYPE + " = ...");
+		code.add("task: " + WORKER + ".Task = ...");
 		// Combine into a Header
 		return new Header(String.join("; ", code), hidden);
 	}

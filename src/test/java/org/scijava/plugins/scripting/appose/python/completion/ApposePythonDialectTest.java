@@ -117,18 +117,22 @@ public class ApposePythonDialectTest {
 		parameters.put("sigma", Variable.ofType(double.class));
 		parameters.put("context", Variable.ofType(Context.class));
 		Header header = dialect.header(parameters);
-		assertEquals("import appose.python_worker; import numpy; " +
-			"image: numpy.ndarray = ...; sigma: float = ...; " +
-			"task: appose.python_worker.Task = ...", header.code());
-		// The imports' names are the header's alone
-		assertEquals(Arrays.asList("appose", "numpy"), Arrays.asList(header
-			.hiddenNames().toArray()));
+		assertEquals("import appose.python_worker as _scijava_python_worker; " +
+			"import numpy as _scijava_numpy; " +
+			"image: _scijava_numpy.ndarray = ...; sigma: float = ...; " +
+			"task: _scijava_python_worker.Task = ...", header.code());
+		// The imports' names are the header's alone: private aliases, binding
+		// no name (e.g. numpy) a script might use itself
+		assertEquals(Arrays.asList("_scijava_python_worker", "_scijava_numpy"),
+			Arrays.asList(header.hiddenNames().toArray()));
 		// numpy is imported only when a parameter needs it
 		header = dialect.header(Collections.singletonMap("sigma", Variable
 			.ofType(double.class)));
-		assertEquals("import appose.python_worker; sigma: float = ...; " +
-			"task: appose.python_worker.Task = ...", header.code());
-		assertEquals(Collections.singleton("appose"), header.hiddenNames());
+		assertEquals("import appose.python_worker as _scijava_python_worker; " +
+			"sigma: float = ...; task: _scijava_python_worker.Task = ...", header
+				.code());
+		assertEquals(Collections.singleton("_scijava_python_worker"), header
+			.hiddenNames());
 	}
 
 	@Test
