@@ -50,8 +50,8 @@ import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.scijava.Context;
-import org.scijava.code.lsp.LanguageServerService;
-import org.scijava.code.lsp.ScriptSession;
+import org.scijava.lsp.LanguageServerService;
+import org.scijava.lsp.ScriptSession;
 import org.scijava.module.ModuleService;
 import org.scijava.script.ScriptInfo;
 import org.scijava.script.ScriptLanguage;
@@ -61,7 +61,7 @@ import org.scijava.script.ScriptService;
 /**
  * End-to-end tests of completing Python scripts run via Appose (see
  * {@link ApposePythonDialect}), with a real ty language server (from
- * scijava-code-lsp-ty, whose own tests test it on plain Python), through the
+ * scijava-lsp-ty, whose own tests test it on plain Python), through the
  * {@link LanguageServerService}, as editors use it: what is particular to
  * these scripts.
  * <p>

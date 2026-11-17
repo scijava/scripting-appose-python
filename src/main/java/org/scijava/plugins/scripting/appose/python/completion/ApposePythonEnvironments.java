@@ -149,12 +149,12 @@ final class ApposePythonEnvironments {
 	 * @param text The script's text.
 	 * @param path The script's file path, or null if it has none.
 	 */
-	org.scijava.code.lsp.Environment environment(final String text,
+	org.scijava.lsp.Environment environment(final String text,
 		final String path)
 	{
 		final String python = scriptPython(text, path);
-		return python == null ? new org.scijava.code.lsp.Environment()
-			: new org.scijava.code.lsp.Environment().withInterpreter(python);
+		return python == null ? new org.scijava.lsp.Environment()
+			: new org.scijava.lsp.Environment().withInterpreter(python);
 	}
 
 	/**
