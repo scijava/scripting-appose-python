@@ -40,8 +40,8 @@ import java.util.Map;
 import net.imglib2.RandomAccessibleInterval;
 
 import org.apposed.appose.NDArray;
-import org.scijava.code.lsp.Environment;
-import org.scijava.code.lsp.ScriptDialect;
+import org.scijava.lsp.Environment;
+import org.scijava.lsp.ScriptDialect;
 import org.scijava.plugin.Parameter;
 import org.scijava.plugin.Plugin;
 import org.scijava.plugins.scripting.appose.python.ApposePythonScriptLanguage;

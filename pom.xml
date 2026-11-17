@@ -96,8 +96,8 @@
 		     NB: Task#log() needs it. -->
 		<scijava-common.version>2.101.0</scijava-common.version>
 
-		<scijava-code-lsp.version>0.1.0-SNAPSHOT</scijava-code-lsp.version>
-		<scijava-code-lsp-ty.version>0.1.0-SNAPSHOT</scijava-code-lsp-ty.version>
+		<scijava-lsp.version>0.1.0-SNAPSHOT</scijava-lsp.version>
+		<scijava-lsp-ty.version>0.1.0-SNAPSHOT</scijava-lsp-ty.version>
 	</properties>
 
 	<dependencies>
@@ -112,13 +112,13 @@
 		</dependency>
 		<dependency>
 			<groupId>org.scijava</groupId>
-			<artifactId>scijava-code-lsp</artifactId>
-			<version>${scijava-code-lsp.version}</version>
+			<artifactId>scijava-lsp</artifactId>
+			<version>${scijava-lsp.version}</version>
 		</dependency>
 		<dependency>
 			<groupId>org.scijava</groupId>
-			<artifactId>scijava-code-lsp-ty</artifactId>
-			<version>${scijava-code-lsp-ty.version}</version>
+			<artifactId>scijava-lsp-ty</artifactId>
+			<version>${scijava-lsp-ty.version}</version>
 			<!-- NB: For integration tests; applications choose their servers. -->
 			<scope>test</scope>
 		</dependency>
