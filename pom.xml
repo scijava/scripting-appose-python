@@ -10,7 +10,7 @@
 	</parent>
 
 	<artifactId>scripting-appose-python</artifactId>
-	<version>0.1.1-SNAPSHOT</version>
+	<version>0.2.0-SNAPSHOT</version>
 
 	<name>SciJava Scripting: Appose Python</name>
 	<description>Python scripting language plugin backed by Appose.</description>
@@ -45,11 +45,9 @@
 	</developers>
 	<contributors>
 		<contributor>
-			<!--
-			NB: Need at least one element to override the parent.
-			See: https://issues.apache.org/jira/browse/MNG-5220
-			-->
-			<name>None</name>
+			<name>Gabriel Selzer</name>
+			<url>https://imagej.net/people/gselzer</url>
+			<properties><id>gselzer</id></properties>
 		</contributor>
 	</contributors>
 
@@ -82,6 +80,8 @@
 		<package-name>org.scijava.plugins.scripting.appose.python</package-name>
 		<main-class>org.scijava.plugins.scripting.appose.python.Main</main-class>
 
+		<surefire.useModulePath>false</surefire.useModulePath>
+
 		<license.licenseName>bsd_2</license.licenseName>
 		<license.copyrightOwners>SciJava developers.</license.copyrightOwners>
 		<license.excludes>**/script_templates/**</license.excludes>
@@ -96,8 +96,8 @@
 		     NB: Task#log() needs it. -->
 		<scijava-common.version>2.101.0</scijava-common.version>
 
-		<scijava-lsp.version>0.1.0-SNAPSHOT</scijava-lsp.version>
-		<scijava-lsp-ty.version>0.1.0-SNAPSHOT</scijava-lsp-ty.version>
+		<scijava-lsp.version>0.1.0</scijava-lsp.version>
+		<scijava-lsp-ty.version>0.1.0</scijava-lsp-ty.version>
 	</properties>
 
 	<dependencies>
@@ -183,4 +183,39 @@
 			<url>https://maven.scijava.org/content/groups/public</url>
 		</repository>
 	</repositories>
+
+	<build>
+		<plugins>
+			<!--
+			NB: Tests run on the classpath since we use scijava-common's tests JAR.
+			That JAR shares the org.scijava module name with scijava-common itself, so
+			it cannot be resolved on the module path.
+			-->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-compiler-plugin</artifactId>
+				<configuration>
+					<!--
+					NB: In module mode, javac does not discover annotation processors
+					on the module path, so the @Plugin indexer must be declared here.
+					-->
+					<annotationProcessorPaths>
+						<path>
+							<groupId>org.scijava</groupId>
+							<artifactId>scijava-common</artifactId>
+							<version>${scijava-common.version}</version>
+						</path>
+					</annotationProcessorPaths>
+				</configuration>
+				<executions>
+					<execution>
+						<id>default-testCompile</id>
+						<configuration>
+							<useModulePath>false</useModulePath>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
+		</plugins>
+	</build>
 </project>
