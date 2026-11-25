@@ -29,8 +29,6 @@
 
 module scripting.appose.python {
 
-    exports org.scijava.plugins.scripting.appose.python;
-
     opens org.scijava.plugins.scripting.appose.python to org.scijava;
     opens org.scijava.plugins.scripting.appose.python.completion to org.scijava;
 
