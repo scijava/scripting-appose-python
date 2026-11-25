@@ -148,40 +148,8 @@ script's own line numbers.
 
 ## Code completion
 
-The Script Editor completes code in these scripts with a Python language
-server, `scijava-lsp-ty`'s: [ty](https://docs.astral.sh/ty/). This
-plugin's
-`ApposePythonDialect` shows it each script as plain Python, and says where
-the script runs (so any other client of `scijava-lsp`'s
-`LanguageServerService` gets the same). It completes names in scope,
-the script's `#@` parameters, `task`, builtins and keywords, and members of
-objects and modules; and it gives function signatures (with parameter names
-and types), documentation, hover and syntax errors.
-
-The server runs in a small environment of its own (`code-lsp-ty`: Python,
-NumPy and ty), which is built in the background
-the first time you complete code, and takes a while only then; until it is, there are no completions. The server
-talks to the editor via the
-[Language Server Protocol](https://microsoft.github.io/language-server-protocol/)
-(see `scijava-lsp`); it sees the script as plain Python, with its `#@`
-parameters declared. One server runs per script environment; servers
-unused for 10 minutes stop. Their error output goes to
-`code-lsp-ty-server.log`, next to Appose's environments.
-
-Once a script's environment is built (in this session or an earlier one),
-the server analyzes the script against it, so that the packages installed
-there are known too. An environment not built yet, e.g. because you just
-added a dependency, is built in the background once the script's environment
-declaration has stayed the same for a few seconds; so its packages are known
-before you run the script, and the next run need not build it. This covers
-every kind of declaration: PyPI and conda packages, and environment files.
-A script running in the environment is waited for first, so an environment
-is never rebuilt beneath a running script; building replaces the
-environment's worker, as the script's next run would. Script parameters are
-known by the Python types they have at run time, e.g. images as NumPy
-arrays.
-
-Typing never waits for the server: if its answer for a word is not ready
-within a moment (the first answer for a package can take a few seconds), it
-is shown once ready. Questions that are no longer of interest (e.g. as you
-type on) are cancelled.
+The Script Editor completes code in appose-python scripts using a Python language
+server (see [`scijava-lsp-ty`](https://github.com/scijava/scijava/tree/main/scijava-lsp-ty)).
+The `ApposePythonDialect` plugin is used to:
+- convert SciJava scripts into text that language server can understand
+- derive `org.scijava.lsp.Environment`s from information contained within the script (including environment filepaths and inline script metadata).
