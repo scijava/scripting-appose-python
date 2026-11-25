@@ -145,3 +145,11 @@ memory) it holds, is otherwise released when the application exits.
 Text printed to stdout and stderr appears in the Script Editor's output
 panes. Errors are reported with a Python traceback that refers to the
 script's own line numbers.
+
+## Code completion
+
+The Script Editor completes code in appose-python scripts using a Python language
+server (see [`scijava-lsp-ty`](https://github.com/scijava/scijava/tree/main/scijava-lsp-ty)).
+The `ApposePythonDialect` plugin is used to:
+- convert SciJava scripts into text that language server can understand
+- derive `org.scijava.lsp.Environment`s from information contained within the script (including environment filepaths and inline script metadata).
