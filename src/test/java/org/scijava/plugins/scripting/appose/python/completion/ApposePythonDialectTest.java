@@ -147,7 +147,7 @@ public class ApposePythonDialectTest {
 	public void testScriptWorkersUntouched() {
 		// Finding where a script runs does not create (or replace) a worker for
 		// it at once, even as its metadata is edited: only once the metadata
-		// has settled (see ApposePythonEnvironmentsTest).
+		// has settled.
 		final String script = "# /// script\n# dependencies = [\"appose\"]\n" +
 			"# ///\nimport os\nos.pa";
 		dialect.environment(script, null);

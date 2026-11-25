@@ -68,7 +68,7 @@ public class ApposePythonDialect implements ScriptDialect {
 	private static final String NUMPY = "_scijava_numpy",
 			WORKER = "_scijava_python_worker";
 
-	@Parameter(required = false)
+	@Parameter
 	private ResidentWorkerService workers;
 
 	private ApposePythonEnvironments environments;

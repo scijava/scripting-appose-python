@@ -47,7 +47,6 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
-import java.util.function.Consumer;
 
 import org.apposed.appose.Environment;
 import org.apposed.appose.util.Environments;
@@ -79,7 +78,7 @@ final class ApposePythonEnvironments {
 	 * How long an environment's configuration must stay the same before it is
 	 * built, in milliseconds.
 	 */
-	static final long SETTLE = 5000;
+	private static final long SETTLE = 5000;
 
 	/** Where settling environments are waited for. */
 	private static final ScheduledExecutorService TIMER = Executors
@@ -89,14 +88,8 @@ final class ApposePythonEnvironments {
 	private static final ExecutorService BUILDS = Executors
 		.newSingleThreadExecutor(daemon("appose-python-prebuild"));
 
-	/** The resident workers, to find built environments; or null if none. */
+	/** The resident workers, to find built environments. */
 	private final ResidentWorkerService workers;
-
-	/** How long a configuration must stay the same before it is built. */
-	private final long settle;
-
-	/** Builds an environment; or null, to build none. */
-	private final Consumer<ScriptEnvironment> build;
 
 	/** Scripts waiting to settle, by path ("" if unsaved): what, and when. */
 	private final Map<String, Settling> settling = new HashMap<>();
@@ -120,25 +113,9 @@ final class ApposePythonEnvironments {
 		}
 	};
 
-	/** @param workers The resident workers, or null if none (none built). */
+	/** @param workers The resident workers. */
 	ApposePythonEnvironments(final ResidentWorkerService workers) {
-		this(workers, SETTLE, null);
-	}
-
-	/**
-	 * @param workers The resident workers, or null if none.
-	 * @param settle How long a configuration must stay the same before it is
-	 *          built, in milliseconds.
-	 * @param build Builds an environment (e.g. a fake one, in tests); or null,
-	 *          to build them with the workers (if any).
-	 */
-	ApposePythonEnvironments(final ResidentWorkerService workers,
-		final long settle, final Consumer<ScriptEnvironment> build)
-	{
 		this.workers = workers;
-		this.settle = settle;
-		this.build = build != null ? build : workers != null ? this::build
-			: null;
 	}
 
 	/**
@@ -207,8 +184,8 @@ final class ApposePythonEnvironments {
 		if (env == null) return null;
 		// NB: A read-only lookup: worker(...) would replace the worker whenever
 		// the configuration changed, i.e. as the user edits it.
-		final ResidentWorker worker = workers == null ? null : workers.find(
-			env.name, env.activate, env.config());
+		final ResidentWorker worker = workers.find(env.name, env.activate, env
+			.config());
 		if (worker != null && worker.environment().isBuilt()) {
 			try {
 				final String python = pythonExecutable(worker.environment().get());
@@ -228,13 +205,12 @@ final class ApposePythonEnvironments {
 
 	/**
 	 * Builds an environment once its configuration has stayed the same for a
-	 * while (see {@link #settle}), unless it was tried already.
+	 * while (see {@link #SETTLE}), unless it was tried already.
 	 */
 	private void prepare(final String path, final ScriptEnvironment env) {
 		// NB: By script, not by environment: an unsaved script's environment
 		// is named after its configuration, so changes to it with each edit.
 		final String script = path == null ? "" : path;
-		if (build == null) return;
 		final String key = env.name + "\n" + env.config();
 		synchronized (settling) {
 			if (key.equals(tried.get(script))) return;
@@ -248,8 +224,8 @@ final class ApposePythonEnvironments {
 					settling.remove(script);
 					if (key.equals(tried.put(script, key))) return;
 				}
-				CompletableFuture.runAsync(() -> build.accept(env), BUILDS);
-			}, settle, TimeUnit.MILLISECONDS)));
+				CompletableFuture.runAsync(() -> build(env), BUILDS);
+			}, SETTLE, TimeUnit.MILLISECONDS)));
 		}
 	}
 
