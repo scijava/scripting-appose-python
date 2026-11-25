@@ -122,6 +122,12 @@ public class ApposePythonDialect implements ScriptDialect {
 	}
 
 	/**
+	 * A {@link String} representation of the Python type corresponding to a
+	 * (Java-based) SciJava script parameter type.
+	 * <p>
+	 * NOTE: This is a best-effort attempt at code that could likely belong
+	 * elsewhere.
+	 * </p>
 	 * @param type the Java type (of a SciJava Script parameter) declared in the
 	 *          script
 	 * @return the Python type of the object given to the script by Appose, or
